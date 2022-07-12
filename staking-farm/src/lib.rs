@@ -46,6 +46,8 @@ const MAX_NUM_ACTIVE_FARMS: usize = 3;
 /// updated in the previous epoch. It will not unlock the funds for 4 epochs.
 const NUM_EPOCHS_TO_UNLOCK: EpochHeight = 4;
 
+const OPTIMISTIC_NUM_EPOCHS_TO_UNLOCK: EpochHeight = 3;
+
 construct_uint! {
     /// 256-bit unsigned integer.
     #[derive(BorshSerialize, BorshDeserialize)]
@@ -60,6 +62,7 @@ pub enum StorageKeys {
     AuthorizedFarmTokens,
     AccountRegistry,
     AccountsNotStakedStakingPool,
+    OptimisticTimeExpectTokens,
 }
 
 /// Tracking balance for burning.
@@ -121,6 +124,16 @@ pub struct StakingContract {
     pub last_epoch_height: EpochHeight,
     /// The last total balance of the account (consists of staked and unstaked balances).
     pub last_total_balance: Balance,
+    pub unstaked_balance_waiting_to_be_received: Balance,
+    pub last_balance_in_contract: Balance,
+    /// the structure contains on which epoch, what amount of tokens are expected
+    /// to arrive after unstaking a specific amount of tokens. They are received as part of the account balance
+    /// because there is not an actual transaction for the unstaking. The structure will collect the optimistic
+    /// arrival time of tokens, usualy 3 epochs, but because the promise could arrive at the next epoch so
+    /// it could take 4 epochs.
+    /// First part of tuple is for amount from unstaking, the second is for not staked rewards
+    pub optimistic_expected_tokens: UnorderedMap<EpochHeight, (Balance, Balance)>,
+
     /// The total amount to burn that will be available.
     /// The fraction of the reward that goes to the owner of the staking pool for running the
     /// validator node.
@@ -238,6 +251,9 @@ impl StakingContract {
         let mut this = Self{
             stake_public_key: old_state.stake_public_key,
             last_epoch_height: old_state.last_epoch_height,
+            last_balance_in_contract: env::account_balance(),
+            unstaked_balance_waiting_to_be_received: 0,
+            optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
             last_total_balance: old_state.last_total_balance,
             reward_fee_fraction: old_state.reward_fee_fraction,
             burn_fee_fraction: old_state.burn_fee_fraction,
@@ -289,6 +305,9 @@ impl StakingContract {
             stake_public_key: stake_public_key.into(),
             last_epoch_height: env::epoch_height(),
             last_total_balance: account_balance,
+            last_balance_in_contract: account_balance,
+            unstaked_balance_waiting_to_be_received: 0,
+            optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
             reward_fee_fraction: UpdatableRewardFee::new(reward_fee_fraction),
             burn_fee_fraction,
             farms: Vector::new(StorageKeys::Farms),

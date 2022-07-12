@@ -16,11 +16,11 @@ pub trait StakingPool{
     fn get_account_info(&self, account_id: &AccountId) -> HumanReadableAccount;
     fn deposit(&mut self, account_id: &AccountId, amount: Balance);
     fn withdraw(&mut self, account_id: &AccountId, amount: Balance) -> bool;
-    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl);
+    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance;
     fn get_account_impl(&self, account_id: &AccountId) -> Box<dyn AccountImpl>;
     fn does_pool_stake_staking_rewards(&self) -> bool;
 
-    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl);
+    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance;
 
     fn save_account(&mut self, account_id: &AccountId, account_impl: &dyn AccountImpl);
 
@@ -53,6 +53,8 @@ pub struct InnerStakingPoolWithoutRewardsRestaked{
     /// Accounts deposit, it would be used when calculating how much of the total rewards is for each account
     /// and also how much of the total staked balance can be unstaked
     pub reward_per_token: Fraction,
+    /// 
+    pub reward_buffered: Balance,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, PartialEq, Eq, Debug)]
@@ -253,6 +255,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         return Self {
             reward_per_token: Fraction::new(0, 0),
             total_staked_balance: 0,
+            reward_buffered: 0,
             accounts: UnorderedMap::new(StorageKeys::AccountsNotStakedStakingPool),
         };
     }
@@ -360,7 +363,7 @@ impl StakingPool for InnerStakingPool{
         return account_has_been_removed;
     }
 
-    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) {
+    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance {
         let account = account_impl
                                         .as_any_mut()
                                         .downcast_mut::<Account>()
@@ -410,9 +413,11 @@ impl StakingPool for InnerStakingPool{
             self.total_staked_balance,
             self.total_stake_shares
         );
+
+        return charge_amount;
     }
 
-    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl){
+    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance{
         let account = account_impl
                                         .as_any_mut()
                                         .downcast_mut::<Account>()
@@ -472,6 +477,8 @@ impl StakingPool for InnerStakingPool{
             self.total_staked_balance,
             self.total_stake_shares
         );
+
+        return receive_amount;
     }
 
     fn save_account(&mut self, account_id: &AccountId, account_impl: &dyn AccountImpl) {
@@ -556,7 +563,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
         return account_has_been_removed;
     }
 
-    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) {
+    fn stake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance{
         assert!(amount > 0, "Staking amount should be positive");
         let account = account_impl
                                         .as_any_mut()
@@ -573,9 +580,11 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
             "@{} staking {}. Total {} unstaked balance and {} staked amount",
             account_id, amount, account.unstaked, account.stake
         );
+
+        return amount;
     }
 
-    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl){
+    fn unstake(&mut self, account_id: &AccountId, amount: Balance, account_impl: &mut dyn AccountImpl) -> Balance{
         let account = account_impl
                                         .as_any_mut()
                                         .downcast_mut::<AccountWithReward>()
@@ -610,6 +619,8 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
             "Contract inner staking pool total staked balance is {}",
             self.total_staked_balance
         );
+
+        return amount;
     }
 
     fn save_account(&mut self, account_id: &AccountId, account_impl: &dyn AccountImpl) {
