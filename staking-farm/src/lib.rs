@@ -14,7 +14,7 @@ use crate::account::{NumStakeShares, Account};
 use crate::farm::Farm;
 use crate::internal::ZERO_ADDRESS;
 use crate::staking_pool::{InnerStakingPool, InnerStakingPoolWithoutRewardsRestaked};
-pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary};
+pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary, ContractBalances, ExpectedTokensInFuture};
 
 mod staking_pool;
 mod account;
@@ -32,7 +32,7 @@ const ON_STAKE_ACTION_GAS: Gas = Gas(20_000_000_000_000);
 
 /// The amount of yocto NEAR the contract dedicates to guarantee that the "share" price never
 /// decreases. It's used during rounding errors for share -> amount conversions.
-const STAKE_SHARE_PRICE_GUARANTEE_FUND: Balance = 1_000_000_000_000;
+pub const STAKE_SHARE_PRICE_GUARANTEE_FUND: Balance = 1_000_000_000_000;
 
 /// There is no deposit balance attached.
 const NO_DEPOSIT: Balance = 0;
@@ -132,7 +132,7 @@ pub struct StakingContract {
     /// arrival time of tokens, usualy 3 epochs, but because the promise could arrive at the next epoch so
     /// it could take 4 epochs.
     /// First part of tuple is for amount from unstaking, the second is for not staked rewards
-    pub optimistic_expected_tokens: UnorderedMap<EpochHeight, (Balance, Balance)>,
+    pub optimistic_expected_tokens: UnorderedMap<EpochHeight, ExpectedTokensInEpoch>,
 
     /// The total amount to burn that will be available.
     /// The fraction of the reward that goes to the owner of the staking pool for running the
@@ -168,6 +168,18 @@ pub struct StakingContract {
 impl Default for StakingContract {
     fn default() -> Self {
         panic!("Staking contract should be initialized before usage")
+    }
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Clone, PartialEq, Debug)]
+pub struct ExpectedTokensInEpoch{
+    pub unstaked_amount: Balance,
+    pub not_staked_reward_amount: Balance,
+}
+
+impl Default for ExpectedTokensInEpoch{
+    fn default() -> Self{
+        Self { unstaked_amount: 0, not_staked_reward_amount: 0 }
     }
 }
 
@@ -305,7 +317,7 @@ impl StakingContract {
             stake_public_key: stake_public_key.into(),
             last_epoch_height: env::epoch_height(),
             last_total_balance: account_balance,
-            last_balance_in_contract: account_balance,
+            last_balance_in_contract: account_balance - total_staked_balance,
             unstaked_balance_waiting_to_be_received: 0,
             optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
             reward_fee_fraction: UpdatableRewardFee::new(reward_fee_fraction),
@@ -406,7 +418,7 @@ mod tests {
             emulator.contract.get_account_unstaked_balance(bob()).0,
             deposit_amount
         );
-        emulator.contract.withdraw(deposit_amount.into(), bob());
+        emulator.contract.withdraw(deposit_amount.into());
         assert_eq!(
             emulator.contract.get_account_unstaked_balance(bob()).0,
             0u128
@@ -1007,7 +1019,7 @@ mod tests {
         println!("Bob rewards {}, rewards in near {}", emulator.contract.get_account_not_staked_rewards(bob()).0,
     yton(emulator.contract.get_account_not_staked_rewards(bob()). 0));
         assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(bob()).0, rewards * 5 / 10);
-        emulator.contract.withdraw_all(bob());
+        emulator.contract.withdraw_all();
         assert_eq!(emulator.contract.get_account_staked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_unstaked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_not_staked_rewards(bob()).0, 0);
@@ -1121,7 +1133,7 @@ mod tests {
 
         emulator.contract.ping();
         let b_withdraw_amount = emulator.contract.get_account_unstaked_balance(b()).0;
-        emulator.contract.withdraw_all(bob());
+        emulator.contract.withdraw_all();
         emulator.amount -= b_withdraw_amount;
 
         emulator.update_context(e(), 0);
@@ -1144,7 +1156,7 @@ mod tests {
         assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(e()).0, e_deposit_amount);
         assert_eq!(emulator.contract.get_account_staked_balance(e()).0, 0);
 
-        emulator.contract.withdraw_all(bob());
+        emulator.contract.withdraw_all();
         emulator.update_context(e(), 0);
         assert_eq!(emulator.contract.get_account_not_staked_rewards(e()).0, 0);
         emulator.update_context(d(), 0);
