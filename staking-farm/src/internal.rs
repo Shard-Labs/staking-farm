@@ -43,7 +43,7 @@ impl StakingContract {
         amount
     }
 
-    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, receiver_account_id: AccountId, amount: Balance, withdraw_rewards: bool) {
+    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, amount: Balance, withdraw_rewards: bool) {
         assert!(amount > 0, "Withdrawal amount should be positive");
 
         let staking_pool = self.get_staking_pool_or_assert_if_not_present(&account_id);
@@ -57,7 +57,7 @@ impl StakingContract {
             self.account_pool_register.remove(&account_id);
         }        
         total_withdraw += amount;
-        Promise::new(receiver_account_id.clone()).transfer(total_withdraw);
+        Promise::new(account_id.clone()).transfer(total_withdraw);
         self.last_total_balance -= total_withdraw;
     }
 
@@ -84,7 +84,7 @@ impl StakingContract {
         assert!(amount > 0, "Unstaking amount should be positive");
         let mut unstaked_amount:Balance = 0;
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
-
+        
         if account_staking_rewards {
             let mut account = self.rewards_staked_staking_pool.get_account_impl(&account_id);
             self.internal_distribute_all_rewards(account.as_mut(), true);
@@ -97,7 +97,7 @@ impl StakingContract {
 
         let optimistic_epoch = env::epoch_height() + OPTIMISTIC_NUM_EPOCHS_TO_UNLOCK;
         let mut amounts = self.optimistic_expected_tokens.get(&optimistic_epoch).unwrap_or_default();
-        amounts.0 += unstaked_amount;
+        amounts.unstaked_amount += unstaked_amount;
         self.optimistic_expected_tokens.insert(&optimistic_epoch, &amounts);
     }
 
@@ -136,55 +136,60 @@ impl StakingContract {
             .unwrap_or_default();
 
         // if there is something left from the previous epoch it should be calculated
-        if previous_epoc_expected_amounts.0 > 0 || previous_epoc_expected_amounts.1 > 0 {
-            if previous_epoc_expected_amounts.1 > 0 {
-                self.rewards_not_staked_staking_pool.reward_buffered += previous_epoc_expected_amounts.1;
+        if previous_epoc_expected_amounts.unstaked_amount > 0 || previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
+            if previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
+                self.rewards_not_staked_staking_pool.reward_buffered += previous_epoc_expected_amounts.not_staked_reward_amount;
             }
-
-            self.last_balance_in_contract += previous_epoc_expected_amounts.0 + previous_epoc_expected_amounts.1;
+            self.last_balance_in_contract += previous_epoc_expected_amounts.unstaked_amount + previous_epoc_expected_amounts.not_staked_reward_amount;
         }
 
-        if this_epoch_expected_amounts.0 > 0 || this_epoch_expected_amounts.1 > 0{
+        if this_epoch_expected_amounts.unstaked_amount > 0 || this_epoch_expected_amounts.not_staked_reward_amount > 0{
             // if contract current balance has also the amount for unstaking + rewards
             // then we can remove both values
             // and increment the buffered reward tally
             if contract_current_balance >= 
                 self.last_balance_in_contract 
-                + this_epoch_expected_amounts.0 + this_epoch_expected_amounts.1 {
-                    self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.1;
-                    self.last_balance_in_contract += this_epoch_expected_amounts.0 + this_epoch_expected_amounts.1;
+                + this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount {
+
+                    self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.not_staked_reward_amount;
+                    self.last_balance_in_contract += this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount;
+
             } else if contract_current_balance >= 
-                self.last_balance_in_contract + this_epoch_expected_amounts.0
+                self.last_balance_in_contract + this_epoch_expected_amounts.unstaked_amount
                 && contract_current_balance < self.last_balance_in_contract 
-                + this_epoch_expected_amounts.0 + this_epoch_expected_amounts.1 {
+                + this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount {
                     // if in this case then only the unstaked amount is being
                     // received, because the promise is being processed in the next epoch
                     // just expect the rewards to be received in the next epoch
-                    self.last_balance_in_contract += this_epoch_expected_amounts.0;
+                    self.last_balance_in_contract += this_epoch_expected_amounts.unstaked_amount;
                     let mut next_epoch_expected_tokens = 
                         self
                         .optimistic_expected_tokens
                         .get(&(self.last_epoch_height + 1))
                         .unwrap_or_default();
 
-                    next_epoch_expected_tokens.1 += this_epoch_expected_amounts.1;
+                    next_epoch_expected_tokens.not_staked_reward_amount += this_epoch_expected_amounts.not_staked_reward_amount;
                     self
                         .optimistic_expected_tokens
                         .insert(&(self.last_epoch_height + 1), &next_epoch_expected_tokens);
-            } else {
-                self.last_balance_in_contract += this_epoch_expected_amounts.1;
-                self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.1;
+            } else if contract_current_balance >= 
+                self.last_balance_in_contract + this_epoch_expected_amounts.not_staked_reward_amount
+                && contract_current_balance < self.last_balance_in_contract 
+                + this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount{
 
-                let mut next_epoch_expected_tokens = 
+                    self.last_balance_in_contract += this_epoch_expected_amounts.not_staked_reward_amount;
+                    self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.not_staked_reward_amount;
+
+                    let mut next_epoch_expected_tokens = 
+                        self
+                        .optimistic_expected_tokens
+                        .get(&(self.last_epoch_height + 1))
+                        .unwrap_or_default();
+
+                    next_epoch_expected_tokens.unstaked_amount += this_epoch_expected_amounts.unstaked_amount;
                     self
-                    .optimistic_expected_tokens
-                    .get(&(self.last_epoch_height + 1))
-                    .unwrap_or_default();
-
-                next_epoch_expected_tokens.0 += this_epoch_expected_amounts.0;
-                self
-                    .optimistic_expected_tokens
-                    .insert(&(self.last_epoch_height + 1), &next_epoch_expected_tokens);
+                        .optimistic_expected_tokens
+                        .insert(&(self.last_epoch_height + 1), &next_epoch_expected_tokens);
             }
         }
     }
@@ -214,6 +219,7 @@ impl StakingContract {
             total_balance,
             self.last_total_balance
         );
+        
         let total_reward = total_balance - self.last_total_balance;
         if total_reward > 0 {
             // The validation fee that will be burnt.
@@ -235,7 +241,7 @@ impl StakingContract {
 
             self
                 .optimistic_expected_tokens
-                .insert(&(self.last_epoch_height + OPTIMISTIC_NUM_EPOCHS_TO_UNLOCK), &(0, not_staked_rewards));
+                .insert(&(self.last_epoch_height + OPTIMISTIC_NUM_EPOCHS_TO_UNLOCK), &ExpectedTokensInEpoch{unstaked_amount: 0, not_staked_reward_amount: not_staked_rewards});
 
             self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards);
             self.rewards_staked_staking_pool.total_staked_balance += remaining_reward - not_staked_rewards;
@@ -265,7 +271,7 @@ impl StakingContract {
                  Attached deposit: {}",
                 epoch_height,
                 total_reward,
-                self.rewards_staked_staking_pool.total_staked_balance,
+                self.rewards_staked_staking_pool.total_staked_balance + self.rewards_not_staked_staking_pool.total_staked_balance,
                 self.rewards_staked_staking_pool.total_stake_shares,
                 env::account_locked_balance(),
                 env::account_balance(),
