@@ -32,6 +32,22 @@ impl HumanReadableFarm {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ContractBalances{
+    pub last_total_balance: U128,
+    pub last_contract_balance: U128,
+    pub locked_balance: U128,
+    pub contract_balance: U128,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ExpectedTokensInFuture{
+    pub unstaked_amount: U128,
+    pub not_staked_reward_amount: U128,
+}
+
 /// Represents an account structure readable by humans.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -216,6 +232,25 @@ impl StakingContract {
     /// Returns the number of accounts that have positive balance on this staking pool.
     pub fn get_number_of_accounts(&self) -> u64 {
         self.rewards_staked_staking_pool.accounts.len() + self.rewards_not_staked_staking_pool.accounts.len()
+    }
+
+    pub fn get_contract_balances(&self) -> ContractBalances{
+        return ContractBalances {
+            last_total_balance: self.last_total_balance.into(),
+            last_contract_balance: self.last_balance_in_contract.into(),
+            contract_balance: env::account_balance().into(), 
+            locked_balance: env::account_locked_balance().into()
+        };
+    }
+
+    pub fn get_expected_amounts_for_epoch(&self, epoch: Option<EpochHeight>) -> ExpectedTokensInFuture{
+        let expected_tokens = self
+            .optimistic_expected_tokens
+            .get(&epoch
+                    .unwrap_or(env::epoch_height()))
+            .unwrap_or_default();
+
+        return ExpectedTokensInFuture { unstaked_amount: expected_tokens.unstaked_amount.into(), not_staked_reward_amount: expected_tokens.not_staked_reward_amount.into() };
     }
 
     /// Returns the list of accounts
