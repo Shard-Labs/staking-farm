@@ -5,6 +5,7 @@ use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{AccountId, Balance, EpochHeight};
 
 use crate::U256;
+use crate::staking_pool::Fraction;
 
 /// A type to distinguish between a balance and "stake" shares for better readability.
 pub type NumStakeShares = Balance;
@@ -60,10 +61,11 @@ pub struct AccountWithReward{
     /// The minimum epoch height when the withdrawn is allowed.
     /// This changes after unstaking action, because the amount is still locked for 3 epochs.
     pub unstaked_available_epoch_height: EpochHeight,
-    /// The reward that has been paid to the account
+    /// The reward that should be paid to the account
     pub reward_tally: Balance,
     /// Bool variable showing whether the reward_tally is positive or negative
     pub tally_below_zero: bool,
+    pub buffered_reward_tally: Fraction,
     /// Last claimed reward for each active farm.
     pub last_farm_reward_per_share: HashMap<u64, U256>,
     /// Farmed tokens withdrawn from the farm but not from the contract.
@@ -80,6 +82,7 @@ impl Default for AccountWithReward {
             tally_below_zero: false,
             last_farm_reward_per_share: HashMap::new(),
             amounts: HashMap::new(),
+            buffered_reward_tally: Fraction { numerator: 0, denominator: 1 },
         }
     }
 }

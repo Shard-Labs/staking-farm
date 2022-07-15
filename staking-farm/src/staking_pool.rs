@@ -54,7 +54,11 @@ pub struct InnerStakingPoolWithoutRewardsRestaked{
     /// and also how much of the total staked balance can be unstaked
     pub reward_per_token: Fraction,
     /// 
-    pub reward_buffered: Balance,
+    pub total_rewards: Balance,
+    /// 
+    pub total_buffered_rewards: Balance,
+    
+
 }
 
 #[derive(BorshDeserialize, BorshSerialize, PartialEq, Eq, Debug)]
@@ -255,7 +259,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         return Self {
             reward_per_token: Fraction::new(0, 0),
             total_staked_balance: 0,
-            reward_buffered: 0,
+            reward_per_token_buffered: Fraction::new(0,0),
             accounts: UnorderedMap::new(StorageKeys::AccountsNotStakedStakingPool),
         };
     }
@@ -278,12 +282,25 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         }
     }
 
-    pub(crate) fn distribute_reward(&mut self, reward:Balance){
+    pub(crate) fn distribute_reward(&mut self, reward:Balance, is_buffered: bool){
         if reward == 0{
             return;
         }
         assert!(self.total_staked_balance > 0, "Cannot distribute reward when staked balance is 0 or below");
-        self.reward_per_token.add(Fraction::new(reward, self.total_staked_balance));
+
+        if is_buffered {
+            self.reward_per_token_buffered.add(Fraction::new(reward, self.total_staked_balance));
+        } else {
+            self.reward_per_token.add(Fraction::new(reward, self.total_staked_balance));
+        }
+    }
+
+    pub(crate) fn compute_reward_available_for_withdraw(&self, account: &AccountWithReward) -> Balance{
+        if account.tally_below_zero {
+            return self.reward_per_token_buffered.multiply(account.stake) + account.reward_tally;
+        }else{
+            return self.reward_per_token_buffered.multiply(account.stake) - account.reward_tally;
+        }
     }
 
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{

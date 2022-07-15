@@ -122,7 +122,12 @@ impl StakingContract {
         }
     }
 
-    fn internal_calculate_received_tokens_from_blockchain(&mut self, contract_current_balance: Balance){
+    /// Calculates how much of the contract balance is received based on not staking rewards from previous epoch
+    /// and unstaking
+    /// Returns the accumulated rewards that should be distributed
+    fn internal_calculate_received_tokens_from_blockchain(&mut self, contract_current_balance: Balance) -> Balance{
+        let mut accumulated_rewards_from_not_staking_rewards: Balance = 0;
+
         let this_epoch_expected_amounts = 
             self
             .optimistic_expected_tokens
@@ -138,7 +143,7 @@ impl StakingContract {
         // if there is something left from the previous epoch it should be calculated
         if previous_epoc_expected_amounts.unstaked_amount > 0 || previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
             if previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
-                self.rewards_not_staked_staking_pool.reward_buffered += previous_epoc_expected_amounts.not_staked_reward_amount;
+                accumulated_rewards_from_not_staking_rewards += previous_epoc_expected_amounts.not_staked_reward_amount;
             }
             self.last_balance_in_contract += previous_epoc_expected_amounts.unstaked_amount + previous_epoc_expected_amounts.not_staked_reward_amount;
         }
@@ -151,7 +156,7 @@ impl StakingContract {
                 self.last_balance_in_contract 
                 + this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount {
 
-                    self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.not_staked_reward_amount;
+                    accumulated_rewards_from_not_staking_rewards += this_epoch_expected_amounts.not_staked_reward_amount;
                     self.last_balance_in_contract += this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount;
 
             } else if contract_current_balance >= 
@@ -178,7 +183,7 @@ impl StakingContract {
                 + this_epoch_expected_amounts.unstaked_amount + this_epoch_expected_amounts.not_staked_reward_amount{
 
                     self.last_balance_in_contract += this_epoch_expected_amounts.not_staked_reward_amount;
-                    self.rewards_not_staked_staking_pool.reward_buffered += this_epoch_expected_amounts.not_staked_reward_amount;
+                    accumulated_rewards_from_not_staking_rewards += this_epoch_expected_amounts.not_staked_reward_amount;
 
                     let mut next_epoch_expected_tokens = 
                         self
@@ -192,6 +197,8 @@ impl StakingContract {
                         .insert(&(self.last_epoch_height + 1), &next_epoch_expected_tokens);
             }
         }
+
+        return accumulated_rewards_from_not_staking_rewards;
     }
 
     /// Distributes rewards after the new epoch. It's automatically called before every action.
@@ -211,7 +218,8 @@ impl StakingContract {
         let total_balance =
             env::account_locked_balance() + contract_current_balance;
 
-        self.internal_calculate_received_tokens_from_blockchain(contract_current_balance);
+        let accumulated_rewards_from_previous_epochs = self.internal_calculate_received_tokens_from_blockchain(contract_current_balance);
+        self.rewards_not_staked_staking_pool.distribute_reward(accumulated_rewards_from_previous_epochs, true);
 
         assert!(
             total_balance >= self.last_total_balance,
@@ -243,7 +251,7 @@ impl StakingContract {
                 .optimistic_expected_tokens
                 .insert(&(self.last_epoch_height + OPTIMISTIC_NUM_EPOCHS_TO_UNLOCK), &ExpectedTokensInEpoch{unstaked_amount: 0, not_staked_reward_amount: not_staked_rewards});
 
-            self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards);
+            self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards, false);
             self.rewards_staked_staking_pool.total_staked_balance += remaining_reward - not_staked_rewards;
 
             // Now buying "stake" shares for the burn.
