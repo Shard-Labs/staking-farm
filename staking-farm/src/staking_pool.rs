@@ -259,7 +259,8 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         return Self {
             reward_per_token: Fraction::new(0, 0),
             total_staked_balance: 0,
-            reward_per_token_buffered: Fraction::new(0,0),
+            total_buffered_rewards: 0,
+            total_rewards: 0,
             accounts: UnorderedMap::new(StorageKeys::AccountsNotStakedStakingPool),
         };
     }
@@ -273,7 +274,10 @@ impl InnerStakingPoolWithoutRewardsRestaked{
     /// If the account balances are 0, the account is deleted instead to release storage.
     /// Returns true or false, wether the account was removeds
     pub(crate) fn internal_save_account(&mut self, account_id: &AccountId, account: &AccountWithReward) -> bool{
-        if account.unstaked > 0 || account.stake > 0 || account.amounts.len() > 0 || account.reward_tally > 0 {
+        if account.unstaked > 0 || 
+            account.stake > 0 || 
+            account.amounts.len() > 0 || 
+            ( account.reward_tally - account.payed_reward ) != 0 {
             self.accounts.insert(account_id, &account);
             return false;
         } else {
@@ -289,26 +293,25 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         assert!(self.total_staked_balance > 0, "Cannot distribute reward when staked balance is 0 or below");
 
         if is_buffered {
-            self.reward_per_token_buffered.add(Fraction::new(reward, self.total_staked_balance));
+            self.total_buffered_rewards += reward;
         } else {
+            self.total_rewards += reward;
             self.reward_per_token.add(Fraction::new(reward, self.total_staked_balance));
         }
     }
 
-    pub(crate) fn compute_reward_available_for_withdraw(&self, account: &AccountWithReward) -> Balance{
-        if account.tally_below_zero {
-            return self.reward_per_token_buffered.multiply(account.stake) + account.reward_tally;
-        }else{
-            return self.reward_per_token_buffered.multiply(account.stake) - account.reward_tally;
-        }
-    }
-
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{
+        let mut reward: Balance = 0;
+        let total_rewards = self.reward_per_token.multiply(self.total_staked_balance);
+        let buffered_rewards_ratio = Fraction { numerator: self.total_buffered_rewards, denominator: total_rewards };
+
         if account.tally_below_zero {
-            return self.reward_per_token.multiply(account.stake) + account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake) + account.reward_tally;
         }else{
-            return self.reward_per_token.multiply(account.stake) - account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake) - account.reward_tally;
         }
+
+        return buffered_rewards_ratio.multiply(reward) - account.payed_reward;
     }
 }
 
@@ -550,11 +553,25 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
 
     fn withdraw_not_staked_rewards(&mut self, account_id: &AccountId) -> (Balance, bool){
         let mut account = self.internal_get_account(&account_id);
-        let reward = self.compute_reward(&account);
-        account.reward_tally = self.reward_per_token.multiply(account.stake);
-        let account_was_removed = self.internal_save_account(&account_id, &account);
+        if account.stake == 0 {
+            assert!(
+                account.unstaked_available_epoch_height <= env::epoch_height(),
+                "The unstaked balance is not yet available due to unstaking delay"
+            );
 
-        return (reward, account_was_removed);
+            /// the reward that left to be payed to the account
+            let reward = account.reward_tally - account.payed_reward;
+            account.payed_reward += reward;
+            self.internal_save_account(&account_id, &account);
+
+            return (reward, false);
+        }else{
+            let reward = self.compute_reward(&account);
+            account.payed_reward += reward;
+            let account_was_removed = self.internal_save_account(&account_id, &account);
+
+            return (reward, account_was_removed);
+        }
     }
 
     fn withdraw(&mut self, account_id: &AccountId, amount: Balance) -> bool{

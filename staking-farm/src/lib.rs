@@ -916,6 +916,16 @@ mod tests {
         assert_eq!(Fraction::new(0, 0).add(Fraction::new(1,5)), &Fraction::new(1,5));
         assert_eq!(Fraction::new(1,5).add(Fraction::default()), &Fraction::new(1,5));
         assert_eq!(Fraction::new(0,0).add(Fraction::default()), &Fraction::default());
+
+        let total_staked_balance: Balance = 32601004691073296566595668410 
+            - (212391910925662939071534681 + 49558112549321352450024752);
+
+        
+        let mut rpt = Fraction {numerator: 204574360324123112677640207, denominator: 32190000000000000000000000000};
+
+        rpt.add(Fraction {numerator: 253413999866417394042330927, denominator: total_staked_balance});
+
+        
     }
 
     #[test]
