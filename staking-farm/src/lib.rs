@@ -8,7 +8,7 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, BorshStorageKey, EpochHeight, Gas,
-    Promise, PromiseResult, PublicKey,
+    Promise, PromiseResult, PublicKey, log,
 };
 use crate::staking_pool::Fraction;
 use uint::construct_uint;
@@ -335,7 +335,7 @@ impl StakingContract {
     #[init(ignore_state)]
     pub fn migrate_state_from_previous_version() -> Self{
         let old_state: OldVersionStakingContract = env::state_read().expect("failed");
-
+        log!("1");
         let mut this = Self{
             stake_public_key: old_state.stake_public_key,
             last_epoch_height: old_state.last_epoch_height,
@@ -353,15 +353,16 @@ impl StakingContract {
             rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
             account_pool_register: old_state.account_pool_register,
         };
-
+        log!("2");
         this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
         this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
         this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
         this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
         
         let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
-
+        log!("3");
         for element in old_state_acc_vec_iter{
+            log!("{}", element.0);
             let acc: AccountWithReward = AccountWithReward { 
                 unstaked: element.1.unstaked, 
                 stake: element.1.stake, 
@@ -1431,5 +1432,10 @@ mod tests {
         emulator.skip_epochs_and_set_reward(1, 0);
         assert_eq!(emulator.contract.get_account_staked_balance(charlie()). 0, ntoy(400));
         assert!(almost_equal(emulator.contract.get_unclaimed_reward(charlie(), 0).0, charlie_farmed + (farm_amount / 4 * 4 / 7) + farm_amount/4 / 11 * 8, ntoy(1) / 100));
+    }
+
+    #[test]
+    fn test_migration(){
+        //let contract = OldVersionStakingContract {}
     }
 }
