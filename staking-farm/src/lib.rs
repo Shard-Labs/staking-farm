@@ -331,7 +331,7 @@ pub struct OldStakingContract {
 #[near_bindgen]
 impl StakingContract {
 
-    #[private]
+    //#[private]
     #[init(ignore_state)]
     pub fn migrate_state_from_previous_version() -> Self{
         let old_state: OldVersionStakingContract = env::state_read().expect("failed");
