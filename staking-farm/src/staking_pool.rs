@@ -1,5 +1,3 @@
-use core::num;
-
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, log, Balance, AccountId};
 use near_sdk::collections::UnorderedMap;
@@ -59,8 +57,6 @@ pub struct InnerStakingPoolWithoutRewardsRestaked{
     pub total_rewards: Balance,
     /// 
     pub total_buffered_rewards: Balance,
-    
-
 }
 
 #[derive(BorshDeserialize, BorshSerialize, PartialEq, Eq, Debug)]
@@ -99,8 +95,7 @@ impl Fraction{
         }
         let delimiter = u128::pow(10, power);
 
-        let mut this = Self { numerator: numerator / delimiter, denominator: denominator / delimiter };
-        //this.simple_form();
+        let this = Self { numerator: numerator / delimiter, denominator: denominator / delimiter };
 
         return this;
     }
@@ -316,7 +311,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
     }
 
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{
-        let mut reward: Balance = 0;
+        let reward: Balance;
         let buffered_rewards_ratio = Fraction::new(self.total_buffered_rewards, self.total_rewards );
 
         if account.tally_below_zero {
@@ -579,7 +574,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
                 "The unstaked balance is not yet available due to unstaking delay"
             );
 
-            /// the reward that left to be payed to the account
+            // the reward that left to be payed to the account
             let reward = account.reward_tally - account.payed_reward;
             account.payed_reward += reward;
             self.internal_save_account(&account_id, &account);

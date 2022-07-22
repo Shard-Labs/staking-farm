@@ -66,7 +66,7 @@ impl StakingContract {
 
         let account_id = env::predecessor_account_id();
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
-        let mut staked_amount: Balance = 0;
+        let staked_amount: Balance;
         if account_staking_rewards {
             let mut account = self.rewards_staked_staking_pool.get_account_impl(&account_id);
             self.internal_distribute_all_rewards(account.as_mut(), true);
@@ -82,7 +82,7 @@ impl StakingContract {
 
     pub(crate) fn inner_unstake(&mut self, account_id: &AccountId, amount: u128) {
         assert!(amount > 0, "Unstaking amount should be positive");
-        let mut unstaked_amount:Balance = 0;
+        let unstaked_amount:Balance;
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
         
         if account_staking_rewards {

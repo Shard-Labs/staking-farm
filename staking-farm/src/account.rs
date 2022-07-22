@@ -5,7 +5,6 @@ use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{AccountId, Balance, EpochHeight};
 
 use crate::U256;
-use crate::staking_pool::Fraction;
 
 /// A type to distinguish between a balance and "stake" shares for better readability.
 pub type NumStakeShares = Balance;
