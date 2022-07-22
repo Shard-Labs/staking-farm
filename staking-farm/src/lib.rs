@@ -191,6 +191,39 @@ pub struct OldVersionStakingContract {
     /// Map showing whether account has his rewards staked or unstaked
     pub account_pool_register: UnorderedMap<AccountId, bool>,
 }
+
+impl OldVersionStakingContract{
+    pub fn new(
+        owner_id: AccountId,
+        stake_public_key: PublicKey,
+        balance: Balance
+    ) -> Self {
+        //assert!(!env::state_exists(), "Already initialized");
+        
+        
+        let account_balance = balance;
+        let total_staked_balance = account_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+
+        let mut this = Self {
+            stake_public_key: stake_public_key.into(),
+            last_epoch_height: env::epoch_height(),
+            last_total_balance: account_balance,
+            reward_fee_fraction: UpdatableRewardFee::new(Ratio { numerator: 1, denominator: 10 }),
+            burn_fee_fraction: Ratio {numerator:1, denominator: 5},
+            farms: Vector::new(b"oldstatef".to_vec()),
+            active_farms: Vec::new(),
+            paused: false,
+            authorized_users: UnorderedSet::new(b"oldstateau".to_vec()),
+            authorized_farm_tokens: UnorderedSet::new(b"oldstateaft".to_vec()),
+            rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(total_staked_balance), total_staked_balance, 0),
+            rewards_not_staked_staking_pool: OldStateInnerStakingPoolWithoutRewardsRestaked {reward_per_token: Fraction::new (0,1), total_staked_balance: 0, accounts: UnorderedMap::new(b"oldacc".to_vec())},
+            account_pool_register: UnorderedMap::new(b"oldstate_apr".to_vec()),
+        };
+
+        this
+    }
+}
+
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct StakingContract {
@@ -334,6 +367,7 @@ impl StakingContract {
     //#[private]
     #[init(ignore_state)]
     pub fn migrate_state_from_previous_version() -> Self{
+        log!("0");
         let old_state: OldVersionStakingContract = env::state_read().expect("failed");
         log!("1");
         let mut this = Self{
@@ -374,9 +408,11 @@ impl StakingContract {
                 amounts: element.1.amounts.clone() 
             };
 
+            //log!("4 {} {}", element.0, acc.);
             this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
         }
 
+        log!("5");
         return this;
     }
 
@@ -405,6 +441,7 @@ impl StakingContract {
 
         this.rewards_staked_staking_pool.accounts = old_state.accounts;
         let owner_id = Self::internal_get_owner_id();
+
         this.internal_register_account_to_staking_pool(&owner_id, true);
         this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
 
@@ -1436,6 +1473,63 @@ mod tests {
 
     #[test]
     fn test_migration(){
-        //let contract = OldVersionStakingContract {}
+        let mut old_state = OldVersionStakingContract::new(
+            "mario".parse().unwrap(), 
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            ntoy(100));
+        let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
+        acc.unstaked = 100;
+        acc.stake_shares = 50;
+        old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
+        let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
+
+        old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
+        acc_rew.unstaked += 10;
+        old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
+
+        let mut this = StakingContract{
+            stake_public_key: old_state.stake_public_key,
+            last_epoch_height: old_state.last_epoch_height,
+            last_balance_in_contract: env::account_balance(),
+            optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
+            last_total_balance: old_state.last_total_balance,
+            reward_fee_fraction: old_state.reward_fee_fraction,
+            burn_fee_fraction: old_state.burn_fee_fraction,
+            farms: old_state.farms,
+            active_farms: old_state.active_farms,
+            paused: old_state.paused,
+            authorized_users: old_state.authorized_users,
+            authorized_farm_tokens: old_state.authorized_farm_tokens,
+            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
+            rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
+            account_pool_register: old_state.account_pool_register,
+        };
+        log!("2");
+        this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
+        this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
+        this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
+        this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
+        
+        let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
+        log!("3");
+        for element in old_state_acc_vec_iter{
+            log!("{}", element.0);
+            let acc: AccountWithReward = AccountWithReward { 
+                unstaked: element.1.unstaked, 
+                stake: element.1.stake, 
+                unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
+                reward_tally: element.1.reward_tally, 
+                tally_below_zero: element.1.tally_below_zero, 
+                payed_reward: 0, 
+                last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
+                amounts: element.1.amounts.clone() 
+            };
+
+            //log!("4 {} {}", element.0, acc.);
+            this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
+        }
+
+        log!("5");
     }
+
 }
