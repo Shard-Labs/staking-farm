@@ -1,3 +1,5 @@
+use core::num;
+
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, log, Balance, AccountId};
 use near_sdk::collections::UnorderedMap;
@@ -71,7 +73,7 @@ impl Default for Fraction{
     fn default() -> Self {
         Self {
             numerator: 0,
-            denominator: 0,
+            denominator: 1,
         }
     }
 }
@@ -81,13 +83,26 @@ impl Fraction{
         numerator: u128, 
         denominator: u128
     )-> Self{
-        assert!((denominator == 0 && numerator == 0) 
-        || (denominator != 0 && numerator != 0), "Denominator can only be 0 if numerator is 0");
+        assert!(denominator != 0 || (numerator == 0 && denominator == 0), "Denominator can only be 0 if numerator is 0");
 
-        return Self{
-            numerator: numerator,
-            denominator: denominator
-        };
+        let smaller_part = std::cmp::min(numerator, denominator);
+        let power: u32;
+
+        if (smaller_part / u128::pow(10, 12)) >= 100 {
+            power = 12;
+        } else if smaller_part / u128::pow(10, 6) >= 100 { 
+            power = 6;
+        } else if smaller_part / u128::pow(10, 3) >= 100 {
+            power = 3;
+        } else {
+            power = 0;
+        }
+        let delimiter = u128::pow(10, power);
+
+        let mut this = Self { numerator: numerator / delimiter, denominator: denominator / delimiter };
+        //this.simple_form();
+
+        return this;
     }
     pub fn add(&mut self, value: Fraction)-> &mut Self{
         if value == Fraction::default(){
@@ -257,7 +272,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
     /// Constructor
     pub fn new() -> Self{
         return Self {
-            reward_per_token: Fraction::new(0, 0),
+            reward_per_token: Fraction::new(0, 1),
             total_staked_balance: 0,
             total_buffered_rewards: 0,
             total_rewards: 0,
@@ -302,8 +317,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
 
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{
         let mut reward: Balance = 0;
-        let total_rewards = self.reward_per_token.multiply(self.total_staked_balance);
-        let buffered_rewards_ratio = Fraction { numerator: self.total_buffered_rewards, denominator: total_rewards };
+        let buffered_rewards_ratio = Fraction::new(self.total_buffered_rewards, self.total_rewards );
 
         if account.tally_below_zero {
             reward = self.reward_per_token.multiply(account.stake) + account.reward_tally;
@@ -528,12 +542,18 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
 
     fn get_account_info(&self, account_id: &AccountId) -> HumanReadableAccount {
         let account = self.internal_get_account(&account_id);
+        let rewards_for_withdraw = 
+            if account.stake == 0 {
+                account.reward_tally - account.payed_reward
+            }else {
+                self.compute_reward(&account)
+            };
         return HumanReadableAccount {
             account_id: account_id.clone(),
             unstaked_balance: account.unstaked.into(),
             staked_balance: account.stake.into(),
             can_withdraw: account.unstaked_available_epoch_height <= env::epoch_height(),
-            rewards_for_withdraw: self.compute_reward(&account).into(),
+            rewards_for_withdraw: rewards_for_withdraw.into(),
         };
     }
 
