@@ -404,11 +404,11 @@ impl StakingContract {
                 reward_tally: element.1.reward_tally, 
                 tally_below_zero: element.1.tally_below_zero, 
                 payed_reward: 0, 
-                last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
-                amounts: element.1.amounts.clone() 
+                last_farm_reward_per_share: HashMap::new(), 
+                amounts: HashMap::new(), 
             };
 
-            //log!("4 {} {}", element.0, acc.);
+            log!("4 {} {}", element.0, acc.stake);
             this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
         }
 
@@ -1477,12 +1477,14 @@ mod tests {
             "mario".parse().unwrap(), 
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             ntoy(100));
+
         let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
         acc.unstaked = 100;
         acc.stake_shares = 50;
         old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
         let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
-
+        acc_rew.amounts.insert(c(), 1000);
+        acc_rew.amounts.insert(d(), 20000);
         old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
         acc_rew.unstaked += 10;
         old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
