@@ -356,7 +356,7 @@ fn test_unstake_rewards(){
 
     assert_eq!(
         view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
-        pool_reward / 2
+        0
     );
 
     get_pool_balances(&pool);
@@ -370,6 +370,10 @@ fn test_unstake_rewards(){
     get_pool_balances(&pool);
     get_pool_expected_amounts(&pool, Some(17));
 
+    assert_eq!(
+        view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
+        to_yocto("10") / 2
+    );
 
 
 }
