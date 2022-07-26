@@ -433,7 +433,7 @@ fn test_unstaking(){
 
     let withdraw_result = call!(
         user1,
-        pool.withdraw_all()
+        pool.withdraw_all(Option::None)
     );
 
     assert_eq!(withdraw_result.is_ok(), false);
@@ -449,7 +449,7 @@ fn test_unstaking(){
 
     assert_all_success(call!(
         user1,
-        pool.withdraw_all())
+        pool.withdraw_all(Option::None))
     );
 
     current_account_balance = get_pool_balances(&pool);
