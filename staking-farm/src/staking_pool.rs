@@ -310,6 +310,17 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         }
     }
 
+    pub(crate) fn compute_possible_reward(&self, account: &AccountWithReward) -> Balance {
+        let reward: Balance;
+        if account.tally_below_zero {
+            reward = self.reward_per_token.multiply(account.stake) + account.reward_tally;
+        }else{
+            reward = self.reward_per_token.multiply(account.stake) - account.reward_tally;
+        }
+
+        return reward - account.payed_reward;
+    }
+
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{
         let reward: Balance;
         let buffered_rewards_ratio = Fraction::new(self.total_buffered_rewards, self.total_rewards );
@@ -347,7 +358,8 @@ impl StakingPool for InnerStakingPool{
                 .staked_amount_from_num_shares_rounded_down(account.stake_shares)
                 .into(),
             can_withdraw: account.unstaked_available_epoch_height <= env::epoch_height(),
-            rewards_for_withdraw: 0.into()
+            rewards_for_withdraw: 0.into(),
+            possible_rewards: 0.into(),
         }
     }
 
@@ -549,6 +561,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
             staked_balance: account.stake.into(),
             can_withdraw: account.unstaked_available_epoch_height <= env::epoch_height(),
             rewards_for_withdraw: rewards_for_withdraw.into(),
+            possible_rewards: self.compute_possible_reward(&account).into(),
         };
     }
 

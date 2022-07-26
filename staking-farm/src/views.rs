@@ -63,6 +63,8 @@ pub struct HumanReadableAccount {
     /// that have their tokens delegated to a pool which
     /// doesnt restake its rewards
     pub rewards_for_withdraw: U128,
+    /// Rewards that are generated without those that are withdrawn
+    pub possible_rewards: U128,
 }
 
 /// Represents pool summary with all farms and rates applied.
@@ -176,6 +178,11 @@ impl StakingContract {
     /// If is in the other pool it will return 0
     pub fn get_account_not_staked_rewards(&self, account_id: AccountId) -> U128{
         self.get_account(account_id).rewards_for_withdraw
+    }
+
+    /// Account possible rewards
+    pub fn get_account_possible_rewards(&self, account_id: AccountId) -> U128{
+        self.get_account(account_id).possible_rewards
     }
 
     /// Returns the unstaked balance of the given account.
