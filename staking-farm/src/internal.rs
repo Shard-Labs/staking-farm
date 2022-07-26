@@ -59,6 +59,7 @@ impl StakingContract {
         total_withdraw += amount;
         Promise::new(receiver_account_id.clone()).transfer(total_withdraw);
         self.last_total_balance -= total_withdraw;
+        self.last_balance_in_contract -= total_withdraw;
     }
 
     pub(crate) fn internal_stake(&mut self, amount: Balance) {
@@ -302,6 +303,10 @@ impl StakingContract {
         }
 
         self.last_total_balance = total_balance;
+        log!("Contract current balance: {} last balance in contract: {}", contract_current_balance, self.last_balance_in_contract);
+        if contract_current_balance > self.last_balance_in_contract{
+            self.last_balance_in_contract += contract_current_balance - self.last_balance_in_contract;
+        }
         true
     }
     

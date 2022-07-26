@@ -414,6 +414,10 @@ fn test_unstaking(){
     ));
     print_current_epoch(&root);
     get_pool_expected_amounts(&pool, Some(17));
+    println!(
+        "{:?}",
+        view!(pool.get_account(user1.account_id())).unwrap_json::<HumanReadableAccount>()
+    );
 
     wait_epoch_and_give_rewards(&root, 0);
     print_current_epoch(&root);
@@ -424,19 +428,8 @@ fn test_unstaking(){
     current_account_balance = get_pool_balances(&pool);
     assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
 
-    wait_epoch_and_give_rewards(&root, 0);
-
-    println!(
-        "{:?}",
-        view!(pool.get_account(user1.account_id())).unwrap_json::<HumanReadableAccount>()
-    );
-
-    let withdraw_result = call!(
-        user1,
-        pool.withdraw_all(Option::None)
-    );
-
-    assert_eq!(withdraw_result.is_ok(), false);
+    print_current_epoch(&root);
+    assert_some_fail(call!(user1, pool.withdraw_all(Option::None)));
 
     reward_pool(&root, pool.account_id(), to_yocto("10"));
     wait_epoch_and_give_rewards(&root, 0);
@@ -447,6 +440,7 @@ fn test_unstaking(){
     current_account_balance = get_pool_balances(&pool);
     assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND + to_yocto("20"));
 
+    println!("Withdraw final");
     assert_all_success(call!(
         user1,
         pool.withdraw_all(Option::None))
@@ -510,7 +504,7 @@ fn test_farm() {
 #[test]
 fn test_farm_with_lockup() {
     let (root, pool) = setup(to_yocto("5"), 1, 3);
-
+    get_pool_balances(&pool);
     let user1 = create_user_and_stake(&root, &pool);
 
     assert_between(
@@ -524,9 +518,10 @@ fn test_farm_with_lockup() {
         "0",
         "0.01",
     );
-
+    
     wait_epoch(&root);
     assert_all_success(call!(root, pool.ping()));
+    print_current_epoch(&root);
 
     // Check that out of 1000 reward, 300 has burnt, 700 is distributed
     // 10% went to the root (fee): +70
@@ -550,6 +545,7 @@ fn test_farm_with_lockup() {
         "300.01",
     );
 
+    println!("Deploy farm");
     deploy_farm(&root);
 
     assert_between(
@@ -600,6 +596,8 @@ fn test_farm_with_lockup() {
         json!({ "staking_pool_account_id": STAKING_POOL_ACCOUNT_ID }),
         0,
     );
+
+    println!("{} deposit", lockup_id());
     call(
         &root,
         lockup_id(),
@@ -617,6 +615,9 @@ fn test_farm_with_lockup() {
     deploy_farm(&root);
 
     // Unstake burnt tokens.
+    print_current_epoch(&root);
+    println!("1 pool balances");
+    get_pool_balances(&pool);
     assert_all_success(call!(root, pool.unstake_burn()));
 
     produce_blocks(&root, 5);
@@ -631,6 +632,10 @@ fn test_farm_with_lockup() {
     account.locked -= to_yocto("300");
     root.borrow_runtime_mut()
         .force_account_update(pool.account_id(), &account);
+
+    assert_all_success(call!(root, pool.ping()));
+    println!("2 pool balances");
+    get_pool_balances(&pool);
 
     assert_between(
         to_int(view!(pool.get_unclaimed_reward(lockup_id(), 1))),
@@ -660,6 +665,8 @@ fn test_farm_with_lockup() {
 
     // Claim from the root directly the rest.
     assert_all_success(call!(root, pool.claim(token_id(), None), deposit = 1));
+
+    assert_all_success(call!(root, pool.ping()));
 
     let claimed3 = balance_of(&root, root.account_id());
     println!(
