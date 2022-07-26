@@ -43,7 +43,7 @@ impl StakingContract {
         amount
     }
 
-    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, amount: Balance, withdraw_rewards: bool) {
+    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, receiver_account_id: &AccountId, amount: Balance, withdraw_rewards: bool) {
         assert!(amount > 0, "Withdrawal amount should be positive");
 
         let staking_pool = self.get_staking_pool_or_assert_if_not_present(&account_id);
@@ -57,7 +57,7 @@ impl StakingContract {
             self.account_pool_register.remove(&account_id);
         }        
         total_withdraw += amount;
-        Promise::new(account_id.clone()).transfer(total_withdraw);
+        Promise::new(receiver_account_id.clone()).transfer(total_withdraw);
         self.last_total_balance -= total_withdraw;
     }
 
@@ -128,25 +128,32 @@ impl StakingContract {
     fn internal_calculate_received_tokens_from_blockchain(&mut self, contract_current_balance: Balance) -> Balance{
         let mut accumulated_rewards_from_not_staking_rewards: Balance = 0;
 
+        // if ping is not being called for some time
+        // there would be some epochs 
+        let mut passed_epochs = self.optimistic_expected_tokens
+            .iter()
+            .filter(|el| (*el).0 <= self.last_epoch_height - 1)
+            .collect::<Vec<(u64, ExpectedTokensInEpoch)>>();
+
+        passed_epochs.sort_by(|a, b| {
+            (&a).0.cmp(&b.0)
+        });
+
+        for passed in passed_epochs{
+            if self.last_balance_in_contract + passed.1.unstaked_amount + passed.1.not_staked_reward_amount <= contract_current_balance{
+                accumulated_rewards_from_not_staking_rewards += passed.1.not_staked_reward_amount;
+                self.last_balance_in_contract += passed.1.unstaked_amount;
+                self.last_balance_in_contract += passed.1.not_staked_reward_amount;
+
+                self.optimistic_expected_tokens.remove(&passed.0);
+            }
+        }
+
         let this_epoch_expected_amounts = 
             self
             .optimistic_expected_tokens
             .remove(&self.last_epoch_height)
             .unwrap_or_default();
-
-        let previous_epoc_expected_amounts = 
-            self
-            .optimistic_expected_tokens
-            .remove(&(self.last_epoch_height - 1))
-            .unwrap_or_default();
-
-        // if there is something left from the previous epoch it should be calculated
-        if previous_epoc_expected_amounts.unstaked_amount > 0 || previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
-            if previous_epoc_expected_amounts.not_staked_reward_amount > 0 {
-                accumulated_rewards_from_not_staking_rewards += previous_epoc_expected_amounts.not_staked_reward_amount;
-            }
-            self.last_balance_in_contract += previous_epoc_expected_amounts.unstaked_amount + previous_epoc_expected_amounts.not_staked_reward_amount;
-        }
 
         if this_epoch_expected_amounts.unstaked_amount > 0 || this_epoch_expected_amounts.not_staked_reward_amount > 0{
             // if contract current balance has also the amount for unstaking + rewards
