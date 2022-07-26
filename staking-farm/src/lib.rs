@@ -580,7 +580,7 @@ mod tests {
             emulator.contract.get_account_unstaked_balance(bob()).0,
             deposit_amount
         );
-        emulator.contract.withdraw(deposit_amount.into());
+        emulator.contract.withdraw(deposit_amount.into(), Option::None);
         assert_eq!(
             emulator.contract.get_account_unstaked_balance(bob()).0,
             0u128
@@ -1201,7 +1201,7 @@ mod tests {
         println!("Bob rewards {}, rewards in near {}", emulator.contract.get_account_not_staked_rewards(bob()).0,
     yton(emulator.contract.get_account_not_staked_rewards(bob()). 0));
         assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(bob()).0, rewards * 5 / 10);
-        emulator.contract.withdraw_all();
+        emulator.contract.withdraw_all(Option::None);
         assert_eq!(emulator.contract.get_account_staked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_unstaked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_not_staked_rewards(bob()).0, 0);
@@ -1347,7 +1347,7 @@ mod tests {
 
         let b_withdraw_amount = emulator.contract.get_account_unstaked_balance(b()).0;
         emulator.update_context(b(), 0);
-        emulator.contract.withdraw_all();
+        emulator.contract.withdraw_all(Option::None);
         emulator.amount -= b_withdraw_amount;
 
         emulator.update_context(d(), 0);
@@ -1377,7 +1377,7 @@ mod tests {
         emulator.update_context(d(), 0);
         rewards_for_d += emulator.contract.get_account_not_staked_rewards(d()).0;
 
-        emulator.contract.withdraw_all();
+        emulator.contract.withdraw_all(Option::None);
         assert_eq!(emulator.contract.get_account_not_staked_rewards(d()).0, 0);
         assert_eq!(d_total_rewards, rewards_for_d);
 
@@ -1532,6 +1532,60 @@ mod tests {
         }
 
         log!("5");
+    }
+    #[test]
+    fn test_rewards_after_not_calling_ping()
+    {
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(initial_balance),
+        );
+
+        let a_deposit_amount = ntoy(50);
+        let b_deposit_amount = ntoy(100);
+        // A deposits and stakes all
+        emulator.deposit_and_stake_rewards_not_stake(a(), a_deposit_amount);
+
+        // B deposits and stakes 50/100
+        emulator.update_context(b(), b_deposit_amount);
+        emulator.contract.deposit_rewards_not_stake();
+        emulator.amount += b_deposit_amount;
+        let b_stake_amount = b_deposit_amount * 5 / 10;
+        emulator.contract.stake((b_stake_amount).into());
+        emulator.simulate_stake_call();
+
+        
+        let mut rewards = ntoy(100);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        rewards = ntoy(150);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, 0);
+        emulator.update_context(b(), 0);
+        emulator.contract.unstake_all();
+
+        emulator.skip_epochs_and_set_reward(1, ntoy(290));
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        emulator.skip_epochs_and_set_reward(10, ntoy(530));
+        emulator.transfer_from_locked_amount_to_contract_balance(ntoy(210));
+        emulator.contract.ping();
+
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        emulator.skip_epochs_and_set_reward(4, 0);
+        emulator.transfer_from_locked_amount_to_contract_balance(ntoy(50));
+        emulator.contract.ping();
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, ntoy(155));
+
+
     }
 
 }
