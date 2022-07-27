@@ -117,113 +117,6 @@ impl UpdatableRewardFee {
     }
 }
 
-/// Inner account data of a delegate.
-#[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq)]
-pub struct OldStateAccountWithReward{
-    /// The unstaked balance. It represents the amount the account has on this contract that
-    /// can either be staked or withdrawn.
-    pub unstaked: Balance,
-    /// The amount of "stake" shares. Every stake share corresponds to the amount of staked balance.
-    /// NOTE: The number of shares should always be less or equal than the amount of staked balance.
-    /// This means the price of stake share should always be at least `1`.
-    /// The price of stake share can be computed as `total_staked_balance` / `total_stake_shares`.
-    pub stake: Balance,
-    /// The minimum epoch height when the withdrawn is allowed.
-    /// This changes after unstaking action, because the amount is still locked for 3 epochs.
-    pub unstaked_available_epoch_height: EpochHeight,
-    /// The reward that has been paid to the account
-    pub reward_tally: Balance,
-    /// Bool variable showing whether the reward_tally is positive or negative
-    pub tally_below_zero: bool,
-    /// Last claimed reward for each active farm.
-    pub last_farm_reward_per_share: HashMap<u64, U256>,
-    /// Farmed tokens withdrawn from the farm but not from the contract.
-    pub amounts: HashMap<AccountId, Balance>,
-}
-
-/// Structure containing information for accounts that have their rewards not being restaked
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct OldStateInnerStakingPoolWithoutRewardsRestaked{
-    pub accounts: UnorderedMap<AccountId, OldStateAccountWithReward>,
-    /// Pool total staked balance
-    pub total_staked_balance: Balance,
-    /// Accounts deposit, it would be used when calculating how much of the total rewards is for each account
-    /// and also how much of the total staked balance can be unstaked
-    pub reward_per_token: Fraction,
-}
-
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct OldVersionStakingContract {
-    /// The public key which is used for staking action. It's the public key of the validator node
-    /// that validates on behalf of the pool.
-    pub stake_public_key: PublicKey,
-    /// The last epoch height when `ping` was called.
-    pub last_epoch_height: EpochHeight,
-    /// The last total balance of the account (consists of staked and unstaked balances).
-    pub last_total_balance: Balance,
-    /// The total amount to burn that will be available.
-    /// The fraction of the reward that goes to the owner of the staking pool for running the
-    /// validator node.
-    pub reward_fee_fraction: UpdatableRewardFee,
-    /// The fraction of the reward that gets burnt.
-    pub burn_fee_fraction: Ratio,
-    /// Farm tokens.
-    pub farms: Vector<Farm>,
-    /// Active farms: indicies into `farms`.
-    pub active_farms: Vec<u64>,
-    /// Whether the staking is paused.
-    /// When paused, the account unstakes everything (stakes 0) and doesn't restake.
-    /// It doesn't affect the staking shares or reward distribution.
-    /// Pausing is useful for node maintenance. Only the owner can pause and resume staking.
-    /// The contract is not paused by default.
-    pub paused: bool,
-    /// Authorized users, allowed to add farms.
-    /// This is done to prevent farm spam with random tokens.
-    /// Should not be a large number.
-    pub authorized_users: UnorderedSet<AccountId>,
-    /// Authorized tokens for farms.
-    /// Required because any contract can call method with ft_transfer_call, so must verify that contract will accept it.
-    pub authorized_farm_tokens: UnorderedSet<AccountId>,
-    /// Inner staking pool, that restakes the received rewards
-    pub rewards_staked_staking_pool: InnerStakingPool,
-    /// Inner staking pool, that doesnt restake rewards
-    pub rewards_not_staked_staking_pool: OldStateInnerStakingPoolWithoutRewardsRestaked,
-    /// Map showing whether account has his rewards staked or unstaked
-    pub account_pool_register: UnorderedMap<AccountId, bool>,
-}
-
-impl OldVersionStakingContract{
-    pub fn new(
-        owner_id: AccountId,
-        stake_public_key: PublicKey,
-        balance: Balance
-    ) -> Self {
-        //assert!(!env::state_exists(), "Already initialized");
-        
-        
-        let account_balance = balance;
-        let total_staked_balance = account_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
-
-        let mut this = Self {
-            stake_public_key: stake_public_key.into(),
-            last_epoch_height: env::epoch_height(),
-            last_total_balance: account_balance,
-            reward_fee_fraction: UpdatableRewardFee::new(Ratio { numerator: 1, denominator: 10 }),
-            burn_fee_fraction: Ratio {numerator:1, denominator: 5},
-            farms: Vector::new(b"oldstatef".to_vec()),
-            active_farms: Vec::new(),
-            paused: false,
-            authorized_users: UnorderedSet::new(b"oldstateau".to_vec()),
-            authorized_farm_tokens: UnorderedSet::new(b"oldstateaft".to_vec()),
-            rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(total_staked_balance), total_staked_balance, 0),
-            rewards_not_staked_staking_pool: OldStateInnerStakingPoolWithoutRewardsRestaked {reward_per_token: Fraction::new (0,1), total_staked_balance: 0, accounts: UnorderedMap::new(b"oldacc".to_vec())},
-            account_pool_register: UnorderedMap::new(b"oldstate_apr".to_vec()),
-        };
-
-        this
-    }
-}
-
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct StakingContract {
@@ -234,6 +127,7 @@ pub struct StakingContract {
     pub last_epoch_height: EpochHeight,
     /// The last total balance of the account (consists of staked and unstaked balances).
     pub last_total_balance: Balance,
+    /// The last available unlocked balance in contract
     pub last_balance_in_contract: Balance,
     /// the structure contains on which epoch, what amount of tokens are expected
     /// to arrive after unstaking a specific amount of tokens. They are received as part of the account balance
@@ -242,7 +136,6 @@ pub struct StakingContract {
     /// it could take 4 epochs.
     /// First part of tuple is for amount from unstaking, the second is for not staked rewards
     pub optimistic_expected_tokens: UnorderedMap<EpochHeight, ExpectedTokensInEpoch>,
-
     /// The total amount to burn that will be available.
     /// The fraction of the reward that goes to the owner of the staking pool for running the
     /// validator node.
@@ -363,59 +256,6 @@ pub struct OldStakingContract {
 
 #[near_bindgen]
 impl StakingContract {
-
-    //#[private]
-    #[init(ignore_state)]
-    pub fn migrate_state_from_previous_version() -> Self{
-        log!("0");
-        let old_state: OldVersionStakingContract = env::state_read().expect("failed");
-        log!("1");
-        let mut this = Self{
-            stake_public_key: old_state.stake_public_key,
-            last_epoch_height: old_state.last_epoch_height,
-            last_balance_in_contract: env::account_balance(),
-            optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
-            last_total_balance: old_state.last_total_balance,
-            reward_fee_fraction: old_state.reward_fee_fraction,
-            burn_fee_fraction: old_state.burn_fee_fraction,
-            farms: old_state.farms,
-            active_farms: old_state.active_farms,
-            paused: old_state.paused,
-            authorized_users: old_state.authorized_users,
-            authorized_farm_tokens: old_state.authorized_farm_tokens,
-            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
-            rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
-            account_pool_register: old_state.account_pool_register,
-        };
-        log!("2");
-        this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
-        this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
-        this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
-        this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
-        
-        let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
-        log!("3");
-        for element in old_state_acc_vec_iter{
-            log!("{}", element.0);
-            let acc: AccountWithReward = AccountWithReward { 
-                unstaked: element.1.unstaked, 
-                stake: element.1.stake, 
-                unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
-                reward_tally: element.1.reward_tally, 
-                tally_below_zero: element.1.tally_below_zero, 
-                payed_reward: 0, 
-                last_farm_reward_per_share: HashMap::new(), 
-                amounts: HashMap::new(), 
-            };
-
-            log!("4 {} {}", element.0, acc.stake);
-            this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
-        }
-
-        log!("5");
-        return this;
-    }
-
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self{
