@@ -17,7 +17,7 @@ const POOL_DEPOSIT: &str = "50";
 near_sdk_sim::lazy_static_include::lazy_static_include_bytes! {
     FACTORY_WASM_BYTES => "../res/staking_factory_release.wasm",
     WHITELIST_WASM_BYTES => "../res/whitelist.wasm",
-    STAKING_FARM_1_0_0_BYTES => "../res/staking_farm_release_1.0.0.wasm",
+    STAKING_FARM_2_0_0_BYTES => "../res/staking_farm_release_2_0_0.wasm",
     STAKING_FARM_BYTES => "../res/staking_farm_release.wasm",
 }
 
@@ -210,27 +210,20 @@ fn test_get_code() {
 }
 
 #[test]
-fn test_staking_pool_upgrade_from_1_0_0() {
+fn test_staking_pool_upgrade_from_2_0_0() {
     let (root, foundation, factory, code_hash) = setup_factory();
-    let hash_1_0_0 = foundation
+    let hash_2_0_0 = foundation
         .call(
             factory.account_id(),
             "store",
-            &STAKING_FARM_1_0_0_BYTES,
+            &STAKING_FARM_2_0_0_BYTES,
             near_sdk_sim::DEFAULT_GAS,
             to_yocto("5"),
         )
         .unwrap_json::<Base58CryptoHash>();
-    call!(foundation, factory.allow_contract(hash_1_0_0)).assert_success();
+    call!(foundation, factory.allow_contract(hash_2_0_0)).assert_success();
 
-    create_staking_pool(&root, &factory, hash_1_0_0).assert_success();
-
-    let attempted_get_version_view = root.view(
-        AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
-        "get_version",
-        &[],
-    );
-    assert!(attempted_get_version_view.is_err());
+    create_staking_pool(&root, &factory, hash_2_0_0).assert_success();
 
     let version_through_call: String = root
         .call(
@@ -241,7 +234,7 @@ fn test_staking_pool_upgrade_from_1_0_0() {
             0,
         )
         .unwrap_json();
-    assert_eq!(version_through_call, "staking-farm:1.0.0");
+    assert_eq!(version_through_call, "staking-farm:2.0.0");
 
     // Upgrade staking pool.
     assert_all_success(root.call(
@@ -253,5 +246,5 @@ fn test_staking_pool_upgrade_from_1_0_0() {
     ));
     // Check that contract works.
     assert_eq!(get_staking_pool_key(&root), STAKING_KEY.parse().unwrap());
-    assert_eq!(get_version(&root), "staking-farm:1.1.0");
+    assert_eq!(get_version(&root), "staking-farm:2.0.0");
 }
