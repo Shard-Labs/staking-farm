@@ -1,16 +1,13 @@
 use std::convert::TryInto;
 
-use account::AccountWithReward;
-use std::collections::HashMap;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, BorshStorageKey, EpochHeight, Gas,
-    Promise, PromiseResult, PublicKey, log,
+    Promise, PromiseResult, PublicKey,
 };
-use crate::staking_pool::Fraction;
 use uint::construct_uint;
 
 use crate::account::{NumStakeShares, Account};
@@ -351,8 +348,6 @@ impl StakingContract {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
     use near_sdk::json_types::U64;
     use near_sdk::mock::VmAction;
@@ -979,8 +974,8 @@ mod tests {
         let mut total_staked_balance = emulator.contract.get_total_staked_balance().0;
         emulator.update_context(bob(), 0);
         emulator.contract.ping();
-        /// the total staked balance in the contract is the 3/4 rewards for
-        /// the staking pool that stakes rewards
+        // the total staked balance in the contract is the 3/4 rewards for
+        // the staking pool that stakes rewards
         assert_eq_in_near!(emulator.contract.get_total_staked_balance().0, 
         total_staked_balance + rewards/4*3  - emulator.contract.get_account_not_staked_rewards(alice()).0);
         
@@ -1111,7 +1106,7 @@ mod tests {
         assert_eq_in_near!(emulator.contract.rewards_not_staked_staking_pool.total_staked_balance,
             c_deposit_amount + e_deposit_amount);
 
-        /// stil the same epoch rewards are not being transfered from locked account balance to account balance
+        // stil the same epoch rewards are not being transfered from locked account balance to account balance
         assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(c()).0, 0);
         //emulator.simulate_stake_call();
 
@@ -1169,7 +1164,7 @@ mod tests {
         emulator.contract.unstake_all();
         
         rewards = ntoy(20);
-        for i in 0..4{
+        for _i in 0..4{
             assert_eq!(emulator.contract.get_account(b()).can_withdraw, false);
             emulator.skip_epochs_and_set_reward(1, rewards);
             emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
@@ -1311,73 +1306,73 @@ mod tests {
         assert!(almost_equal(emulator.contract.get_unclaimed_reward(charlie(), 0).0, charlie_farmed + (farm_amount / 4 * 4 / 7) + farm_amount/4 / 11 * 8, ntoy(1) / 100));
     }
 
-    #[test]
-    fn test_migration(){
-        let mut old_state = OldVersionStakingContract::new(
-            "mario".parse().unwrap(), 
-            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
-            ntoy(100));
+    // #[test]
+    // fn test_migration(){
+    //     let mut old_state = OldVersionStakingContract::new(
+    //         "mario".parse().unwrap(), 
+    //         "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+    //         ntoy(100));
 
-        let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
-        acc.unstaked = 100;
-        acc.stake_shares = 50;
-        old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
-        let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
-        acc_rew.amounts.insert(c(), 1000);
-        acc_rew.amounts.insert(d(), 20000);
-        old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
-        acc_rew.unstaked += 10;
-        old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
+    //     let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
+    //     acc.unstaked = 100;
+    //     acc.stake_shares = 50;
+    //     old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
+    //     let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
+    //     acc_rew.amounts.insert(c(), 1000);
+    //     acc_rew.amounts.insert(d(), 20000);
+    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
+    //     acc_rew.unstaked += 10;
+    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
 
-        let mut this = StakingContract{
-            stake_public_key: old_state.stake_public_key,
-            last_epoch_height: old_state.last_epoch_height,
-            last_balance_in_contract: env::account_balance(),
-            optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
-            last_total_balance: old_state.last_total_balance,
-            reward_fee_fraction: old_state.reward_fee_fraction,
-            burn_fee_fraction: old_state.burn_fee_fraction,
-            farms: old_state.farms,
-            active_farms: old_state.active_farms,
-            paused: old_state.paused,
-            authorized_users: old_state.authorized_users,
-            authorized_farm_tokens: old_state.authorized_farm_tokens,
-            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
-            rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
-            account_pool_register: old_state.account_pool_register,
-        };
-        log!("2");
-        this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
-        this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
-        this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
-        this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
+    //     let mut this = StakingContract{
+    //         stake_public_key: old_state.stake_public_key,
+    //         last_epoch_height: old_state.last_epoch_height,
+    //         last_balance_in_contract: env::account_balance(),
+    //         optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
+    //         last_total_balance: old_state.last_total_balance,
+    //         reward_fee_fraction: old_state.reward_fee_fraction,
+    //         burn_fee_fraction: old_state.burn_fee_fraction,
+    //         farms: old_state.farms,
+    //         active_farms: old_state.active_farms,
+    //         paused: old_state.paused,
+    //         authorized_users: old_state.authorized_users,
+    //         authorized_farm_tokens: old_state.authorized_farm_tokens,
+    //         rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
+    //         rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
+    //         account_pool_register: old_state.account_pool_register,
+    //     };
+    //     log!("2");
+    //     this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
+    //     this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
+    //     this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
+    //     this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
         
-        let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
-        log!("3");
-        for element in old_state_acc_vec_iter{
-            log!("{}", element.0);
-            let acc: AccountWithReward = AccountWithReward { 
-                unstaked: element.1.unstaked, 
-                stake: element.1.stake, 
-                unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
-                reward_tally: element.1.reward_tally, 
-                tally_below_zero: element.1.tally_below_zero, 
-                payed_reward: 0, 
-                last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
-                amounts: element.1.amounts.clone() 
-            };
+    //     let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
+    //     log!("3");
+    //     for element in old_state_acc_vec_iter{
+    //         log!("{}", element.0);
+    //         let acc: AccountWithReward = AccountWithReward { 
+    //             unstaked: element.1.unstaked, 
+    //             stake: element.1.stake, 
+    //             unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
+    //             reward_tally: element.1.reward_tally, 
+    //             tally_below_zero: element.1.tally_below_zero, 
+    //             payed_reward: 0, 
+    //             last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
+    //             amounts: element.1.amounts.clone() 
+    //         };
 
-            //log!("4 {} {}", element.0, acc.);
-            this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
-        }
+    //         //log!("4 {} {}", element.0, acc.);
+    //         this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
+    //     }
 
-        log!("5");
-    }
+    //     log!("5");
+    // }
     #[test]
     fn test_rewards_after_not_calling_ping()
     {
         let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
-        let initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
             owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),

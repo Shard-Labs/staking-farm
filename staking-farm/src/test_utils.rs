@@ -190,11 +190,11 @@ pub mod tests {
             self.simulate_stake_call();
         }
 
-        pub fn deposit(&mut self, account: AccountId, amount: Balance){
-            self.update_context(account.clone(), amount);
-            self.contract.deposit();
-            self.amount += amount;
-        }
+        // pub fn deposit(&mut self, account: AccountId, amount: Balance){
+        //     self.update_context(account.clone(), amount);
+        //     self.contract.deposit();
+        //     self.amount += amount;
+        // }
 
         pub fn skip_epochs(&mut self, num: EpochHeight) {
             self.epoch_height += num;

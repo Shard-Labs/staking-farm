@@ -339,7 +339,7 @@ fn test_unstake_rewards(){
     ));
 
     print_current_epoch(&root);
-    let mut pool_reward = to_yocto("10");
+    let pool_reward = to_yocto("10");
     get_pool_balances(&pool);
     reward_pool(&root, pool.account_id(), pool_reward);
     assert_all_success(call!(root, pool.ping()));
