@@ -36,7 +36,6 @@ impl HumanReadableFarm {
 #[serde(crate = "near_sdk::serde")]
 pub struct ContractBalances{
     pub last_total_balance: U128,
-    pub last_contract_balance: U128,
     pub locked_balance: U128,
     pub contract_balance: U128,
 }
@@ -244,21 +243,18 @@ impl StakingContract {
     pub fn get_contract_balances(&self) -> ContractBalances{
         return ContractBalances {
             last_total_balance: self.last_total_balance.into(),
-            last_contract_balance: self.last_balance_in_contract.into(),
             contract_balance: env::account_balance().into(), 
             locked_balance: env::account_locked_balance().into()
         };
     }
 
-    pub fn get_expected_amounts_for_epoch(&self, epoch: Option<EpochHeight>) -> ExpectedTokensInFuture{
-        let expected_tokens = self
-            .optimistic_expected_tokens
+    pub fn get_expected_amounts_for_epoch(&self, epoch: Option<EpochHeight>) -> Balance{
+        return self
+            .expected_rewards_in_epoch
             .get(&epoch
                     .unwrap_or(env::epoch_height()))
             .unwrap_or_default();
-
-        return ExpectedTokensInFuture { unstaked_amount: expected_tokens.unstaked_amount.into(), not_staked_reward_amount: expected_tokens.not_staked_reward_amount.into() };
-    }
+        }
 
     /// Returns the list of accounts
     pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount> {
@@ -272,13 +268,13 @@ impl StakingContract {
             .map(|index| self.get_account(keys.get(index).unwrap()))
             .collect::<Vec<HumanReadableAccount>>();
 
-        if upper_bound - (result.len() as u64) > 0 {
+        if limit - (result.len() as u64) > 0 {
             let other_keys = self
                 .rewards_not_staked_staking_pool
                 .accounts
                 .keys_as_vector();
                 
-            let other_upper_bound = std::cmp::min(upper_bound - (result.len() as u64), other_keys.len());
+            let other_upper_bound = std::cmp::min(limit - (result.len() as u64), other_keys.len());
             let other_result = (0..other_upper_bound)
                 .map(|index| self.get_account(other_keys.get(index).unwrap()))
                 .collect::<Vec<HumanReadableAccount>>();
