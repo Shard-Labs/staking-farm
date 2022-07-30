@@ -301,20 +301,20 @@ fn print_current_epoch(root: &UserAccount){
 fn get_pool_balances(pool: &ContractAccount<StakingContractContract>) -> ContractBalances{
     let pool_balances = view!(pool.get_contract_balances()).unwrap_json::<ContractBalances>();
     println!(
-        "Contract balance {} and locked balance {} last contract balance {} last total balance {}", 
-        pool_balances.contract_balance.0, pool_balances.locked_balance.0, pool_balances.last_contract_balance.0, pool_balances.last_total_balance.0
+        "Contract balance {} and locked balance {} last total balance {}", 
+        pool_balances.contract_balance.0, pool_balances.locked_balance.0, pool_balances.last_total_balance.0
     );
 
     return pool_balances;
 }
 
-fn get_pool_expected_amounts(pool: &ContractAccount<StakingContractContract>, epoch: Option<EpochHeight>) -> ExpectedTokensInFuture{
+fn get_pool_expected_reward(pool: &ContractAccount<StakingContractContract>, epoch: Option<EpochHeight>) -> Balance{
 
-    let amounts = view!(pool.get_expected_amounts_for_epoch(epoch)).unwrap_json::<ExpectedTokensInFuture>();
+    let amounts = view!(pool.get_expected_amounts_for_epoch(epoch)).unwrap_json::<Balance>();
     if epoch.is_some(){
         print!("For epoch {} ", epoch.unwrap());
     }
-    println!("expected unstaked amount {} and rewards {}", amounts.unstaked_amount.0, amounts.not_staked_reward_amount.0);
+    println!("expected rewards {}", amounts);
 
     return amounts;
 }
@@ -360,7 +360,7 @@ fn test_unstake_rewards(){
     );
 
     get_pool_balances(&pool);
-    get_pool_expected_amounts(&pool, Some(17));
+    get_pool_expected_reward(&pool, Some(17));
 
     wait_epoch_and_give_rewards(&root, 0);
     wait_epoch_and_give_rewards(&root, 0);
@@ -368,7 +368,7 @@ fn test_unstake_rewards(){
 
     assert_all_success(call!(root, pool.ping()));
     get_pool_balances(&pool);
-    get_pool_expected_amounts(&pool, Some(17));
+    get_pool_expected_reward(&pool, Some(17));
 
     assert_eq!(
         view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
@@ -413,7 +413,7 @@ fn test_unstaking(){
         pool.unstake(to_yocto("20").into())
     ));
     print_current_epoch(&root);
-    get_pool_expected_amounts(&pool, Some(17));
+    get_pool_expected_reward(&pool, Some(17));
     println!(
         "{:?}",
         view!(pool.get_account(user1.account_id())).unwrap_json::<HumanReadableAccount>()
@@ -447,7 +447,6 @@ fn test_unstaking(){
     );
 
     current_account_balance = get_pool_balances(&pool);
-    assert_eq!(current_account_balance.last_contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
 
 }
 
