@@ -116,12 +116,12 @@ impl StakingContract {
     /// Calculates how much of the contract balance is received based on not staking rewards from previous epoch
     /// and unstaking
     /// Returns the accumulated rewards that should be distributed
-    fn internal_calculate_received_tokens_from_blockchain(&mut self, contract_current_balance: Balance) -> Balance{
+    fn internal_calculate_received_tokens_from_blockchain(&mut self) -> Balance{
         let mut accumulated_rewards_from_not_staking_rewards: Balance = 0;
 
         // if ping is not being called for some time
         // there would be some epochs 
-        let mut passed_epochs = self.expected_rewards_in_epoch
+        let passed_epochs = self.expected_rewards_in_epoch
             .iter()
             .filter(|el| (*el).0 <= self.last_epoch_height)
             .collect::<Vec<(u64, Balance)>>();
@@ -159,7 +159,7 @@ impl StakingContract {
             self.last_total_balance
         );
 
-        let accumulated_rewards_from_previous_epochs = self.internal_calculate_received_tokens_from_blockchain(contract_current_balance);
+        let accumulated_rewards_from_previous_epochs = self.internal_calculate_received_tokens_from_blockchain();
         self.rewards_not_staked_staking_pool.distribute_reward(accumulated_rewards_from_previous_epochs, true);
 
         let total_reward = total_balance - self.last_total_balance;
