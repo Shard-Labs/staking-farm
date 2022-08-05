@@ -1,6 +1,6 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
-use near_sdk::AccountId;
+use near_sdk::{AccountId, EpochHeight};
 use near_sdk_sim::types::Balance;
 use near_sdk_sim::{
     call, deploy, init_simulator, to_yocto, view, ContractAccount, ExecutionResult, UserAccount,
@@ -9,7 +9,7 @@ use near_sdk_sim::{
 
 use near_sdk_sim::num_rational::Rational;
 use staking_farm::{
-    HumanReadableAccount, HumanReadableFarm, PoolSummary, Ratio, StakingContractContract,
+    HumanReadableAccount, HumanReadableFarm, PoolSummary, Ratio, StakingContractContract, ContractBalances, STAKE_SHARE_PRICE_GUARANTEE_FUND
 };
 
 type PoolContract = ContractAccount<StakingContractContract>;
@@ -51,6 +51,37 @@ fn wait_epoch(user: &UserAccount) {
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
         to_yocto("1000"),
     );
+}
+
+fn wait_epoch_and_give_rewards(user: &UserAccount, rewards: Balance){
+    let epoch_height = user.borrow_runtime().cur_block.epoch_height;
+    while user.borrow_runtime().cur_block.epoch_height == epoch_height {
+        assert!(user.borrow_runtime_mut().produce_block().is_ok());
+    }
+
+    if rewards != 0 {
+    // sim framework doesn't provide block rewards.
+    // model the block reward by sending more funds on the account.
+        user.transfer(
+            AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
+            rewards,
+        );
+    }
+}
+
+pub fn reward_pool(root: &UserAccount, pool: AccountId, amount: Balance) {
+    let mut runtime = root.borrow_runtime_mut();
+    let mut pool_account = runtime.view_account(pool.as_str()).unwrap();
+    pool_account.locked += amount;
+    runtime.force_account_update(pool, &pool_account);
+}
+
+pub fn transfer_from_locked_to_unlocked_balance(root: &UserAccount, pool: AccountId, amount: Balance){
+    let mut runtime = root.borrow_runtime_mut();
+    let mut pool_account = runtime.view_account(pool.as_str()).unwrap();
+    pool_account.locked -= amount;
+    pool_account.amount += amount;
+    runtime.force_account_update(pool, &pool_account);
 }
 
 fn are_all_success(result: ExecutionResult) -> (bool, String) {
@@ -263,6 +294,162 @@ fn produce_blocks(root: &UserAccount, num_blocks: u32) {
     }
 }
 
+fn print_current_epoch(root: &UserAccount){
+    println!("Epoch {}", root.borrow_runtime().current_block().epoch_height);
+}
+
+fn get_pool_balances(pool: &ContractAccount<StakingContractContract>) -> ContractBalances{
+    let pool_balances = view!(pool.get_contract_balances()).unwrap_json::<ContractBalances>();
+    println!(
+        "Contract balance {} and locked balance {} last total balance {}", 
+        pool_balances.contract_balance.0, pool_balances.locked_balance.0, pool_balances.last_total_balance.0
+    );
+
+    return pool_balances;
+}
+
+fn get_pool_expected_reward(pool: &ContractAccount<StakingContractContract>, epoch: Option<EpochHeight>) -> Balance{
+
+    let amounts = view!(pool.get_expected_amounts_for_epoch(epoch)).unwrap_json::<Balance>();
+    if epoch.is_some(){
+        print!("For epoch {} ", epoch.unwrap());
+    }
+    println!("expected rewards {}", amounts);
+
+    return amounts;
+}
+
+#[test]
+fn test_unstake_rewards(){
+    let (root, pool) = setup(to_yocto("50") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0);
+
+    let user1  = root.create_user(AccountId::new_unchecked("user1".to_string()), to_yocto("51"));
+    let user2 = root.create_user(AccountId::new_unchecked("user2".to_string()), to_yocto("101"));
+
+    assert_all_success(call!(
+        user1, 
+        pool.deposit_and_stake(), 
+        deposit = to_yocto("50")
+    ));
+
+    assert_all_success(call!(
+        user2, 
+        pool.deposit_and_stake_rewards_not_stake(), 
+        deposit = to_yocto("100")
+    ));
+
+    print_current_epoch(&root);
+    let pool_reward = to_yocto("10");
+    get_pool_balances(&pool);
+    reward_pool(&root, pool.account_id(), pool_reward);
+    assert_all_success(call!(root, pool.ping()));
+
+    assert_eq!(
+        view!(pool.get_account(user1.account_id())).unwrap_json::<HumanReadableAccount>().staked_balance.0, 
+        to_yocto("50") + pool_reward / 4
+    );
+
+    assert_eq!(
+        view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().staked_balance.0, 
+        to_yocto("100")
+    );
+
+    assert_eq!(
+        view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
+        0
+    );
+
+    get_pool_balances(&pool);
+    get_pool_expected_reward(&pool, Some(17));
+
+    wait_epoch_and_give_rewards(&root, 0);
+    wait_epoch_and_give_rewards(&root, 0);
+    transfer_from_locked_to_unlocked_balance(&root, pool.account_id(), to_yocto("5"));
+
+    assert_all_success(call!(root, pool.ping()));
+    get_pool_balances(&pool);
+    get_pool_expected_reward(&pool, Some(17));
+
+    assert_eq!(
+        view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
+        to_yocto("10") / 2
+    );
+
+
+}
+
+#[test]
+fn test_unstaking(){
+    let (root, pool) = setup(to_yocto("100") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0);
+
+    let user1  = root.create_user(AccountId::new_unchecked("user1".to_string()), to_yocto("100"));
+    
+    assert_all_success(call!(
+        user1, 
+        pool.deposit_and_stake(), 
+        deposit = to_yocto("50")
+    ));
+    
+    print_current_epoch(&root);
+    wait_epoch_and_give_rewards(&root, 0);
+    print_current_epoch(&root);
+    get_pool_balances(&pool);
+    reward_pool(&root, pool.account_id(), to_yocto("10"));
+    
+    assert_all_success(call!(root, pool.ping()));
+    assert_eq!(
+        to_int(view!(pool.get_account_total_balance(root.account_id()))),
+        0
+    );
+    let mut current_account_balance = get_pool_balances(&pool);
+
+    assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
+    assert_eq!(current_account_balance.locked_balance.0, to_yocto("160"));
+
+    print_current_epoch(&root);
+    println!("User1 unstaking {} yocto", to_yocto("20"));
+    assert_all_success(call!(
+        user1,
+        pool.unstake(to_yocto("20").into())
+    ));
+    print_current_epoch(&root);
+    get_pool_expected_reward(&pool, Some(17));
+    println!(
+        "{:?}",
+        view!(pool.get_account(user1.account_id())).unwrap_json::<HumanReadableAccount>()
+    );
+
+    wait_epoch_and_give_rewards(&root, 0);
+    print_current_epoch(&root);
+    println!("Reward pool");
+    reward_pool(&root, pool.account_id(), to_yocto("10"));
+
+    assert_all_success(call!(root, pool.ping()));
+    current_account_balance = get_pool_balances(&pool);
+    assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
+
+    print_current_epoch(&root);
+    assert_some_fail(call!(user1, pool.withdraw_all(Option::None)));
+
+    reward_pool(&root, pool.account_id(), to_yocto("10"));
+    wait_epoch_and_give_rewards(&root, 0);
+    transfer_from_locked_to_unlocked_balance(&root, pool.account_id(), to_yocto("20"));
+    
+    assert_all_success(call!(root, pool.ping()));
+
+    current_account_balance = get_pool_balances(&pool);
+    assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND + to_yocto("20"));
+
+    println!("Withdraw final");
+    assert_all_success(call!(
+        user1,
+        pool.withdraw_all(Option::None))
+    );
+
+    current_account_balance = get_pool_balances(&pool);
+
+}
+
 /// Test clean calculations without rewards and burn.
 #[test]
 fn test_farm() {
@@ -316,7 +503,7 @@ fn test_farm() {
 #[test]
 fn test_farm_with_lockup() {
     let (root, pool) = setup(to_yocto("5"), 1, 3);
-
+    get_pool_balances(&pool);
     let user1 = create_user_and_stake(&root, &pool);
 
     assert_between(
@@ -330,9 +517,10 @@ fn test_farm_with_lockup() {
         "0",
         "0.01",
     );
-
+    
     wait_epoch(&root);
     assert_all_success(call!(root, pool.ping()));
+    print_current_epoch(&root);
 
     // Check that out of 1000 reward, 300 has burnt, 700 is distributed
     // 10% went to the root (fee): +70
@@ -356,6 +544,7 @@ fn test_farm_with_lockup() {
         "300.01",
     );
 
+    println!("Deploy farm");
     deploy_farm(&root);
 
     assert_between(
@@ -406,6 +595,8 @@ fn test_farm_with_lockup() {
         json!({ "staking_pool_account_id": STAKING_POOL_ACCOUNT_ID }),
         0,
     );
+
+    println!("{} deposit", lockup_id());
     call(
         &root,
         lockup_id(),
@@ -423,6 +614,9 @@ fn test_farm_with_lockup() {
     deploy_farm(&root);
 
     // Unstake burnt tokens.
+    print_current_epoch(&root);
+    println!("1 pool balances");
+    get_pool_balances(&pool);
     assert_all_success(call!(root, pool.unstake_burn()));
 
     produce_blocks(&root, 5);
@@ -437,6 +631,10 @@ fn test_farm_with_lockup() {
     account.locked -= to_yocto("300");
     root.borrow_runtime_mut()
         .force_account_update(pool.account_id(), &account);
+
+    assert_all_success(call!(root, pool.ping()));
+    println!("2 pool balances");
+    get_pool_balances(&pool);
 
     assert_between(
         to_int(view!(pool.get_unclaimed_reward(lockup_id(), 1))),
@@ -466,6 +664,8 @@ fn test_farm_with_lockup() {
 
     // Claim from the root directly the rest.
     assert_all_success(call!(root, pool.claim(token_id(), None), deposit = 1));
+
+    assert_all_success(call!(root, pool.ping()));
 
     let claimed3 = balance_of(&root, root.account_id());
     println!(

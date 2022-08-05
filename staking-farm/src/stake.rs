@@ -80,12 +80,18 @@ impl StakingContract {
 
     /// Withdraws the entire unstaked balance from the predecessor account.
     /// It's only allowed if the `unstake` action was not performed in the four most recent epochs.
-    pub fn withdraw_all(&mut self, receiver_account_id: AccountId) {
+    pub fn withdraw_all(&mut self, receiver_account_id: Option<AccountId>) {
         let need_to_restake = self.internal_ping();
+
+        let acc_receive_id = if env::is_valid_account_id(receiver_account_id.clone().unwrap_or(env::predecessor_account_id()).as_bytes()) {
+            receiver_account_id.unwrap_or(env::predecessor_account_id())
+        }else {
+            env::predecessor_account_id()
+        };
 
         let account_id = env::predecessor_account_id();
         let account_unstaked = self.get_account_unstaked_balance(account_id.clone()).0;
-        self.internal_withdraw(&account_id, receiver_account_id , account_unstaked, true);
+        self.internal_withdraw(&env::predecessor_account_id(), &acc_receive_id, account_unstaked, true);
 
         if need_to_restake {
             self.internal_restake();
@@ -94,11 +100,17 @@ impl StakingContract {
 
     /// Withdraws the non staked balance for given account.
     /// It's only allowed if the `unstake` action was not performed in the four most recent epochs.
-    pub fn withdraw(&mut self, amount: U128, receiver_account_id: AccountId) {
+    pub fn withdraw(&mut self, amount: U128, receiver_account_id: Option<AccountId>) {
         let need_to_restake = self.internal_ping();
 
+        let acc_receive_id = if env::is_valid_account_id(receiver_account_id.clone().unwrap_or(env::predecessor_account_id()).as_bytes()) {
+            receiver_account_id.unwrap_or(env::predecessor_account_id())
+        }else {
+            env::predecessor_account_id()
+        };
+
         let amount: Balance = amount.into();
-        self.internal_withdraw(&env::predecessor_account_id(), receiver_account_id, amount, false);
+        self.internal_withdraw(&env::predecessor_account_id(), &acc_receive_id, amount, false);
 
         if need_to_restake {
             self.internal_restake();
@@ -151,7 +163,7 @@ impl StakingContract {
     pub fn unstake(&mut self, amount: U128) {
         // Unstake action always restakes
         self.internal_ping();
-
+        
         let amount: Balance = amount.into();
         self.inner_unstake(&env::predecessor_account_id(), amount);
 
@@ -169,7 +181,7 @@ impl StakingContract {
         let account = self.rewards_staked_staking_pool.internal_get_account(&account_id);
         if account.unstaked > MIN_BURN_AMOUNT {
             // TODO: replace with burn host function when available.
-            self.internal_withdraw(&account_id, account_id.clone(), account.unstaked, false);
+            self.internal_withdraw(&account_id, &account_id, account.unstaked, false);
         }
     }
 

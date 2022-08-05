@@ -7,7 +7,7 @@ pub const OWNER_KEY: &[u8; 5] = b"OWNER";
 pub const FACTORY_KEY: &[u8; 7] = b"FACTORY";
 pub const VERSION_KEY: &[u8; 7] = b"VERSION";
 const GET_CODE_METHOD_NAME: &[u8; 8] = b"get_code";
-const GET_CODE_GAS: Gas = Gas(50_000_000_000_000);
+const GET_CODE_GAS: Gas = Gas(80_000_000_000_000);
 const SELF_UPGRADE_METHOD_NAME: &[u8; 6] = b"update";
 const SELF_MIGRATE_METHOD_NAME: &[u8; 7] = b"migrate";
 const UPGRADE_GAS_LEFTOVER: Gas = Gas(5_000_000_000_000);
@@ -285,7 +285,7 @@ pub extern "C" fn migrate() {
     // Will fail migration in the case of trying to skip the versions.
     assert_eq!(
         StakingContract::internal_get_state_version(),
-        "staking-farm:1.0.0"
+        "staking-farm:2.0.0"
     );
     StakingContract::internal_set_version();
 }

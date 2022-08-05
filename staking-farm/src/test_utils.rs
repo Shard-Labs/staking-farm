@@ -163,7 +163,8 @@ pub mod tests {
         }
 
         pub fn simulate_stake_call(&mut self) {
-            let total_stake = self.contract.rewards_staked_staking_pool.total_staked_balance;
+            let total_stake = 
+                self.contract.rewards_staked_staking_pool.total_staked_balance + self.contract.rewards_not_staked_staking_pool.total_staked_balance;
             // Stake action
             self.amount = self.amount + self.locked_amount - total_stake;
             self.locked_amount = total_stake;
@@ -189,11 +190,11 @@ pub mod tests {
             self.simulate_stake_call();
         }
 
-        pub fn deposit(&mut self, account: AccountId, amount: Balance){
-            self.update_context(account.clone(), amount);
-            self.contract.deposit();
-            self.amount += amount;
-        }
+        // pub fn deposit(&mut self, account: AccountId, amount: Balance){
+        //     self.update_context(account.clone(), amount);
+        //     self.contract.deposit();
+        //     self.amount += amount;
+        // }
 
         pub fn skip_epochs(&mut self, num: EpochHeight) {
             self.epoch_height += num;
@@ -210,5 +211,28 @@ pub mod tests {
             self.locked_amount = self.locked_amount + amount;
             self.update_context(staking(), 0);
         }
+
+        pub fn transfer_from_locked_amount_to_contract_balance(&mut self, amount: Balance){
+            self.locked_amount -= amount;
+            self.amount += amount;
+            self.update_context(staking(), 0);
+        }
+
+        pub fn pay_rewards_on_epoch(&mut self, rewards_for_epoch: &UnorderedMap<EpochHeight, Balance>){
+            let amount_to_pay = rewards_for_epoch.get(&self.epoch_height).unwrap_or(0);
+
+            self.transfer_from_locked_amount_to_contract_balance(amount_to_pay);
+        }
+
+        pub fn distribute_rewards_between_pools(&self, rewards_for_epoch: &mut UnorderedMap<EpochHeight, Balance>, amount: Balance, epochs_wait_count: EpochHeight){
+            
+            let not_staked_rewards =     (U256::from(self.contract.rewards_not_staked_staking_pool.total_staked_balance) * U256::from(amount)
+            / (U256::from(self.contract.rewards_staked_staking_pool.total_staked_balance) 
+            + U256::from(self.contract.rewards_not_staked_staking_pool.total_staked_balance)))
+        .as_u128();
+
+            rewards_for_epoch.insert(&(self.epoch_height + epochs_wait_count), &not_staked_rewards);
+        }
+
     }
 }

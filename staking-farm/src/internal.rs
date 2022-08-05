@@ -42,7 +42,7 @@ impl StakingContract {
         amount
     }
 
-    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, receiver_account_id: AccountId, amount: Balance, withdraw_rewards: bool) {
+    pub(crate) fn internal_withdraw(&mut self, account_id: &AccountId, receiver_account_id: &AccountId, amount: Balance, withdraw_rewards: bool) {
         assert!(amount > 0, "Withdrawal amount should be positive");
 
         let staking_pool = self.get_staking_pool_or_assert_if_not_present(&account_id);
@@ -79,8 +79,8 @@ impl StakingContract {
 
     pub(crate) fn inner_unstake(&mut self, account_id: &AccountId, amount: u128) {
         assert!(amount > 0, "Unstaking amount should be positive");
-
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
+        
         if account_staking_rewards {
             let mut account = self.rewards_staked_staking_pool.get_account_impl(&account_id);
             self.internal_distribute_all_rewards(account.as_mut(), true);
@@ -126,8 +126,9 @@ impl StakingContract {
         // NOTE: We need to subtract `attached_deposit` in case `ping` called from `deposit` call
         // since the attached deposit gets included in the `account_balance`, and we have not
         // accounted it yet.
+        let contract_current_balance = env::account_balance() - env::attached_deposit();
         let total_balance =
-            env::account_locked_balance() + env::account_balance() - env::attached_deposit();
+            env::account_locked_balance() + contract_current_balance;
 
         assert!(
             total_balance >= self.last_total_balance,
@@ -135,6 +136,9 @@ impl StakingContract {
             total_balance,
             self.last_total_balance
         );
+
+        self.rewards_not_staked_staking_pool.calculate_rewards_ready_to_buffer(epoch_height);
+
         let total_reward = total_balance - self.last_total_balance;
         if total_reward > 0 {
             // The validation fee that will be burnt.
@@ -153,6 +157,10 @@ impl StakingContract {
             let not_staked_rewards = self.part_of_amount_based_on_stake_share_rounded_down(
                 remaining_reward, 
                 self.rewards_not_staked_staking_pool.total_staked_balance);
+
+            self
+                .rewards_not_staked_staking_pool.expected_rewards_in_epoch
+                .insert(&(self.last_epoch_height + NUM_EPOCHS_TO_UNLOCK), &not_staked_rewards);
 
             self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards);
             self.rewards_staked_staking_pool.total_staked_balance += remaining_reward - not_staked_rewards;
@@ -176,11 +184,17 @@ impl StakingContract {
 
             log!(
                 "Epoch {}: Contract received total rewards of {} tokens. \
-                 New total staked balance is {}. Total number of shares {}",
+                 New total staked balance is {}. Total number of shares {} \
+                 Account locked balance: {} \
+                 Account balance: {} \
+                 Attached deposit: {}",
                 epoch_height,
                 total_reward,
-                self.rewards_staked_staking_pool.total_staked_balance,
+                self.rewards_staked_staking_pool.total_staked_balance + self.rewards_not_staked_staking_pool.total_staked_balance,
                 self.rewards_staked_staking_pool.total_stake_shares,
+                env::account_locked_balance(),
+                env::account_balance(),
+                env::attached_deposit(),
             );
             if num_owner_shares > 0 || num_burn_shares > 0 {
                 log!(

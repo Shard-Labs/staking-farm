@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
 use near_sdk::json_types::U128;
@@ -14,7 +13,8 @@ use crate::account::{NumStakeShares, Account};
 use crate::farm::Farm;
 use crate::internal::ZERO_ADDRESS;
 use crate::staking_pool::{InnerStakingPool, InnerStakingPoolWithoutRewardsRestaked};
-pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary};
+pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary, ContractBalances };
+pub use crate::staking_utils::Ratio;
 
 mod staking_pool;
 mod account;
@@ -22,6 +22,7 @@ mod farm;
 mod internal;
 mod owner;
 mod stake;
+mod staking_utils;
 #[cfg(test)]
 mod test_utils;
 mod token_receiver;
@@ -32,7 +33,7 @@ const ON_STAKE_ACTION_GAS: Gas = Gas(20_000_000_000_000);
 
 /// The amount of yocto NEAR the contract dedicates to guarantee that the "share" price never
 /// decreases. It's used during rounding errors for share -> amount conversions.
-const STAKE_SHARE_PRICE_GUARANTEE_FUND: Balance = 1_000_000_000_000;
+pub const STAKE_SHARE_PRICE_GUARANTEE_FUND: Balance = 1_000_000_000_000;
 
 /// There is no deposit balance attached.
 const NO_DEPOSIT: Balance = 0;
@@ -60,6 +61,8 @@ pub enum StorageKeys {
     AuthorizedFarmTokens,
     AccountRegistry,
     AccountsNotStakedStakingPool,
+    OptimisticTimeExpectTokens,
+    ExpectedTokensInEpoch,
 }
 
 /// Tracking balance for burning.
@@ -158,32 +161,7 @@ impl Default for StakingContract {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, PartialEq, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct Ratio {
-    pub numerator: u32,
-    pub denominator: u32,
-}
-
-impl Ratio {
-    pub fn assert_valid(&self) {
-        assert_ne!(self.denominator, 0, "Denominator must be a positive number");
-        assert!(
-            self.numerator <= self.denominator,
-            "The reward fee must be less or equal to 1"
-        );
-    }
-
-    pub fn multiply(&self, value: Balance) -> Balance {
-        if self.denominator == 0 || self.numerator == 0 {
-            0
-        } else {
-            (U256::from(self.numerator) * U256::from(value) / U256::from(self.denominator))
-                .as_u128()
-        }
-    }
-}
-
+/// Old struct https://github.com/referencedev/staking-farm
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct OldStakingContract {
     /// The public key which is used for staking action. It's the public key of the validator node
@@ -229,7 +207,6 @@ pub struct OldStakingContract {
 
 #[near_bindgen]
 impl StakingContract {
-
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self{
@@ -253,6 +230,7 @@ impl StakingContract {
 
         this.rewards_staked_staking_pool.accounts = old_state.accounts;
         let owner_id = Self::internal_get_owner_id();
+
         this.internal_register_account_to_staking_pool(&owner_id, true);
         this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
 
@@ -326,7 +304,7 @@ mod tests {
     use near_sdk::serde_json::json;
     use near_sdk::test_utils::{get_created_receipts, testing_env_with_promise_results};
 
-    use crate::staking_pool::Fraction;
+    use crate::staking_utils::Fraction;
     use crate::test_utils::tests::*;
     use crate::test_utils::*;
 
@@ -387,7 +365,7 @@ mod tests {
             emulator.contract.get_account_unstaked_balance(bob()).0,
             deposit_amount
         );
-        emulator.contract.withdraw(deposit_amount.into(), bob());
+        emulator.contract.withdraw(deposit_amount.into(), Option::None);
         assert_eq!(
             emulator.contract.get_account_unstaked_balance(bob()).0,
             0u128
@@ -882,9 +860,17 @@ mod tests {
         assert_eq_in_near!(f1.multiply(ntoy(30)), ntoy(28));
 
         assert_eq!(0, Fraction::new(1, 5).add(Fraction::new(1,5)).multiply(0));
-        assert_eq!(Fraction::new(0, 0).add(Fraction::new(1,5)), &Fraction::new(1,5));
+        assert_eq!(Fraction::new(0, 1).add(Fraction::new(1,5)), &Fraction::new(1,5));
         assert_eq!(Fraction::new(1,5).add(Fraction::default()), &Fraction::new(1,5));
-        assert_eq!(Fraction::new(0,0).add(Fraction::default()), &Fraction::default());
+        assert_eq!(Fraction::new(0,1).add(Fraction::default()), &Fraction::default());
+
+        let total_staked_balance: Balance = 32601004691073296566595668410 
+            - (212391910925662939071534681 + 49558112549321352450024752);
+
+        let mut rpt = Fraction::new (204574360324123112677640207, 32190000000000000000000000000);
+
+        rpt.add(Fraction ::new (253413999866417394042330927, total_staked_balance));
+
     }
 
     #[test]
@@ -893,7 +879,7 @@ mod tests {
             owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
-            Some(ntoy(110)),
+            Some(ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND),
         );
 
         let bob_deposit_amount = ntoy(50);
@@ -938,8 +924,10 @@ mod tests {
         let mut total_staked_balance = emulator.contract.get_total_staked_balance().0;
         emulator.update_context(bob(), 0);
         emulator.contract.ping();
+        // the total staked balance in the contract is the 3/4 rewards for
+        // the staking pool that stakes rewards
         assert_eq_in_near!(emulator.contract.get_total_staked_balance().0, 
-        total_staked_balance + rewards  - emulator.contract.get_account_not_staked_rewards(alice()).0);
+        total_staked_balance + rewards/4*3  - emulator.contract.get_account_not_staked_rewards(alice()).0);
         
         total_staked_balance = emulator.contract.get_total_staked_balance().0;
         emulator.update_context(alice(), 0);
@@ -954,7 +942,7 @@ mod tests {
             owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
-            Some(ntoy(110)),
+            Some(ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND),
         );
 
         let bob_deposit_amount = ntoy(100);
@@ -968,6 +956,7 @@ mod tests {
 
         // 10 epochs later, unstake all.
         emulator.skip_epochs(10);
+
         let rewards = ntoy(10u128);
         // Overriding rewards
         emulator.locked_amount = locked_amount + rewards;
@@ -975,20 +964,29 @@ mod tests {
         emulator.contract.ping();
         emulator.update_context(bob(), 0);
         println!("{}", yton(rewards*5/10));
+        emulator.skip_epochs_and_set_reward(4, 0);
+        emulator.transfer_from_locked_amount_to_contract_balance(ntoy(5));
+        emulator.contract.ping();
+
         assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(bob()).0, rewards * 5 / 10);
         assert_eq_in_near!(emulator.contract.get_account_staked_balance(bob()).0, bob_deposit_amount);
         assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(bob()).0, 0);
         
+        emulator.update_context(bob(), 0);
+
         emulator.contract.unstake_all();
         emulator.simulate_stake_call();
         assert_eq_in_near!(emulator.contract.get_account_staked_balance(bob()).0, 0);
         assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(bob()).0, bob_deposit_amount);
-        emulator.skip_epochs(5);
+        emulator.skip_epochs_and_set_reward(3, 0);
+        emulator.contract.ping();
+        emulator.skip_epochs_and_set_reward(1, 0);
+
         emulator.update_context(bob(), 0);
         println!("Bob rewards {}, rewards in near {}", emulator.contract.get_account_not_staked_rewards(bob()).0,
     yton(emulator.contract.get_account_not_staked_rewards(bob()). 0));
         assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(bob()).0, rewards * 5 / 10);
-        emulator.contract.withdraw_all(bob());
+        emulator.contract.withdraw_all(Option::None);
         assert_eq!(emulator.contract.get_account_staked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_unstaked_balance(bob()).0, 0);
         assert_eq!(emulator.contract.get_account_not_staked_rewards(bob()).0, 0);
@@ -996,13 +994,17 @@ mod tests {
 
     #[test]
     fn test_stake_two_pools(){
-        let initial_balance = ntoy(100);
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
             owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(initial_balance),
         );
+
+        let mut future_rewards = UnorderedMap::new("fr".as_bytes());
+
         // 5 delegators A, B, C, D, E
         // A, B -> first pool that stakes rewards (50, 100 (stakes 50))
         // C, E -> second pool that saves the rewards (60, 40)
@@ -1039,19 +1041,23 @@ mod tests {
 
         let mut rewards = ntoy(60);
         // override rewards
-        emulator.skip_epochs_and_set_reward(5, rewards);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+        emulator.pay_rewards_on_epoch(&future_rewards);
+
         emulator.update_context(a(), 0);
         let mut expected_reward = emulator.locked_amount + emulator.amount - emulator.contract.last_total_balance;
         assert_eq!(rewards, expected_reward);
         emulator.contract.ping();
         emulator.update_context(a(), 0);
         assert_eq_in_near!(emulator.contract.rewards_staked_staking_pool.total_staked_balance, 
-            a_deposit_amount + b_stake_amount + ntoy(40) + initial_balance);
+            a_deposit_amount + b_stake_amount + ntoy(40) + initial_stake);
 
         assert_eq_in_near!(emulator.contract.rewards_not_staked_staking_pool.total_staked_balance,
             c_deposit_amount + e_deposit_amount);
 
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(c()).0, ntoy(12));
+        // stil the same epoch rewards are not being transfered from locked account balance to account balance
+        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(c()).0, 0);
         //emulator.simulate_stake_call();
 
         // D deposit and stake
@@ -1061,75 +1067,107 @@ mod tests {
         emulator.contract.stake_all();
         emulator.simulate_stake_call();
 
-        rewards = ntoy(132);
-        emulator.skip_epochs_and_set_reward(5, rewards);
+        rewards = ntoy(44);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+        emulator.pay_rewards_on_epoch(&future_rewards);
+
         emulator.update_context(a(), 0);
         expected_reward = emulator.locked_amount + emulator.amount - emulator.contract.last_total_balance;
         assert_eq!(rewards, expected_reward);
         emulator.contract.ping();
 
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(30));
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(e()).0, ntoy(8) + ntoy(12));
+        println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
+
+        rewards = ntoy(116);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+        emulator.pay_rewards_on_epoch(&future_rewards);
+        emulator.contract.ping();
+
+        println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
+
+        rewards = ntoy(53);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+        emulator.pay_rewards_on_epoch(&future_rewards);
+        emulator.contract.ping();
+        emulator.skip_epochs_and_set_reward(1, 0);
+        emulator.contract.ping();
+        
+        println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
+
+        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(8));
+        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(e()).0, ntoy(5));
         println!("Total staked balance for first pool {}", emulator.contract.rewards_staked_staking_pool.total_staked_balance);
 
         emulator.update_context(e(), 0);
         let e_rewards = emulator.contract.get_account_not_staked_rewards(e()).0;
         emulator.contract.withdraw_rewards(bob());
-        emulator.locked_amount -= e_rewards;
+        emulator.amount -= e_rewards;
 
         assert_eq!(emulator.contract.get_account_not_staked_rewards(e()).0, 0);
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(30));
+        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(8));
 
         emulator.update_context(b(), 0);
-        assert_eq_in_near!(emulator.contract.get_account_staked_balance(b()).0, b_stake_amount + ntoy(10 + 18));
+        assert_eq_in_near!(emulator.contract.get_account_staked_balance(b()).0, b_stake_amount + ntoy(41));
         println!("Total staked balance before B exit {}", yton(emulator.contract.rewards_staked_staking_pool.total_staked_balance));
+        let b_staked = emulator.contract.get_account_staked_balance(b()).0;
         emulator.contract.unstake_all();
-        emulator.simulate_stake_call();
-        assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(b()).0, b_deposit_amount + ntoy(10) + ntoy(18));
+        
+        rewards = ntoy(20);
+        for _i in 0..4{
+            assert_eq!(emulator.contract.get_account(b()).can_withdraw, false);
+            emulator.skip_epochs_and_set_reward(1, rewards);
+            emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+            emulator.pay_rewards_on_epoch(&future_rewards);
+            emulator.contract.ping();  
+
+            println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
+        }
+        
+        emulator.transfer_from_locked_amount_to_contract_balance(b_staked);
+        assert_eq!(emulator.contract.get_account(b()).can_withdraw, true);
+        assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(b()).0, b_deposit_amount + ntoy(41));
         assert_eq!(emulator.contract.get_account_staked_balance(b()).0, 0);
         println!("Total staked balance for first pool {}", yton(emulator.contract.rewards_staked_staking_pool.total_staked_balance));
 
-        // Overriding rewards
-        rewards = ntoy(434);
-        emulator.skip_epochs_and_set_reward(5, rewards);
-        emulator.update_context(b(), 0);
-        assert_eq_in_near!(emulator.contract.rewards_staked_staking_pool.total_stake_shares, ntoy(100 + 50));
-        assert_eq_in_near!(emulator.contract.rewards_not_staked_staking_pool.total_staked_balance, ntoy(60 + 40 + 100));
-        println!("first pool total staked {}", yton(emulator.contract.rewards_staked_staking_pool.total_staked_balance));
-        
-        expected_reward = emulator.locked_amount + emulator.amount - emulator.contract.last_total_balance;
-        assert_eq!(rewards, expected_reward);
-
-        emulator.contract.ping();
         let b_withdraw_amount = emulator.contract.get_account_unstaked_balance(b()).0;
-        emulator.contract.withdraw_all(bob());
+        emulator.update_context(b(), 0);
+        emulator.contract.withdraw_all(Option::None);
         emulator.amount -= b_withdraw_amount;
 
-        emulator.update_context(e(), 0);
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(30 + 100));
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(e()).0, ntoy(40));
-        emulator.contract.unstake_all();
-        emulator.simulate_stake_call();
-        assert_eq_in_near!(emulator.contract.rewards_not_staked_staking_pool.total_staked_balance, ntoy(60 + 100));
-        assert_eq_in_near!(emulator.contract.rewards_staked_staking_pool.total_staked_balance, ntoy(234+234));
-        
-        rewards = ntoy(628);
-        emulator.skip_epochs_and_set_reward(5, rewards);
-        expected_reward = emulator.locked_amount + emulator.amount - emulator.contract.last_total_balance;
-        assert_eq!(rewards, expected_reward);
-
-        emulator.contract.ping();
-        emulator.update_context(e(), 0);
-
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(e()).0, ntoy(40));
-        assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(e()).0, e_deposit_amount);
-        assert_eq!(emulator.contract.get_account_staked_balance(e()).0, 0);
-
-        emulator.contract.withdraw_all(bob());
-        emulator.update_context(e(), 0);
-        assert_eq!(emulator.contract.get_account_not_staked_rewards(e()).0, 0);
         emulator.update_context(d(), 0);
-        assert_eq_in_near!(emulator.contract.get_account_not_staked_rewards(d()).0, ntoy(30 + 100 + 100));
+        
+        println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
+        let mut rewards_for_d = emulator.contract.get_account_not_staked_rewards(d()).0;
+        assert!(rewards_for_d > 0);
+        emulator.contract.withdraw_rewards(d());
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(d()).0, 0);
+
+        let d_staked_amount = emulator.contract.get_account_staked_balance(d()).0;
+        emulator.contract.unstake_all();
+        let d_total_rewards = emulator.contract.rewards_not_staked_staking_pool.reward_per_token.multiply(d_staked_amount) - ntoy(20);
+
+        rewards = ntoy(10);
+        for _ in 0..4{
+            emulator.skip_epochs_and_set_reward(1, rewards);
+            emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
+            emulator.pay_rewards_on_epoch(&future_rewards);
+            emulator.contract.ping();  
+            println!("Rewards for withdraw for user d : {}", emulator.contract.get_account_not_staked_rewards(d()).0);   
+        }
+
+        emulator.update_context(d(), 0);
+
+        emulator.transfer_from_locked_amount_to_contract_balance(d_staked_amount);
+        emulator.update_context(d(), 0);
+        rewards_for_d += emulator.contract.get_account_not_staked_rewards(d()).0;
+
+        emulator.contract.withdraw_all(Option::None);
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(d()).0, 0);
+        assert_eq!(d_total_rewards, rewards_for_d);
+
     }
 
     #[test]
@@ -1218,5 +1256,122 @@ mod tests {
         emulator.skip_epochs_and_set_reward(1, 0);
         assert_eq!(emulator.contract.get_account_staked_balance(charlie()). 0, ntoy(400));
         assert!(almost_equal(emulator.contract.get_unclaimed_reward(charlie(), 0).0, charlie_farmed + (farm_amount / 4 * 4 / 7) + farm_amount/4 / 11 * 8, ntoy(1) / 100));
+    }
+
+    // #[test]
+    // fn test_migration(){
+    //     let mut old_state = OldVersionStakingContract::new(
+    //         "mario".parse().unwrap(), 
+    //         "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+    //         ntoy(100));
+
+    //     let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
+    //     acc.unstaked = 100;
+    //     acc.stake_shares = 50;
+    //     old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
+    //     let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
+    //     acc_rew.amounts.insert(c(), 1000);
+    //     acc_rew.amounts.insert(d(), 20000);
+    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
+    //     acc_rew.unstaked += 10;
+    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
+
+    //     let mut this = StakingContract{
+    //         stake_public_key: old_state.stake_public_key,
+    //         last_epoch_height: old_state.last_epoch_height,
+    //         last_balance_in_contract: env::account_balance(),
+    //         optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
+    //         last_total_balance: old_state.last_total_balance,
+    //         reward_fee_fraction: old_state.reward_fee_fraction,
+    //         burn_fee_fraction: old_state.burn_fee_fraction,
+    //         farms: old_state.farms,
+    //         active_farms: old_state.active_farms,
+    //         paused: old_state.paused,
+    //         authorized_users: old_state.authorized_users,
+    //         authorized_farm_tokens: old_state.authorized_farm_tokens,
+    //         rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
+    //         rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
+    //         account_pool_register: old_state.account_pool_register,
+    //     };
+    //     log!("2");
+    //     this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
+    //     this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
+    //     this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
+    //     this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
+        
+    //     let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
+    //     log!("3");
+    //     for element in old_state_acc_vec_iter{
+    //         log!("{}", element.0);
+    //         let acc: AccountWithReward = AccountWithReward { 
+    //             unstaked: element.1.unstaked, 
+    //             stake: element.1.stake, 
+    //             unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
+    //             reward_tally: element.1.reward_tally, 
+    //             tally_below_zero: element.1.tally_below_zero, 
+    //             payed_reward: 0, 
+    //             last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
+    //             amounts: element.1.amounts.clone() 
+    //         };
+
+    //         //log!("4 {} {}", element.0, acc.);
+    //         this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
+    //     }
+
+    //     log!("5");
+    // }
+    #[test]
+    fn test_rewards_after_not_calling_ping()
+    {
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(initial_balance),
+        );
+
+        let a_deposit_amount = ntoy(50);
+        let b_deposit_amount = ntoy(100);
+        // A deposits and stakes all
+        emulator.deposit_and_stake_rewards_not_stake(a(), a_deposit_amount);
+
+        // B deposits and stakes 50/100
+        emulator.update_context(b(), b_deposit_amount);
+        emulator.contract.deposit_rewards_not_stake();
+        emulator.amount += b_deposit_amount;
+        let b_stake_amount = b_deposit_amount * 5 / 10;
+        emulator.contract.stake((b_stake_amount).into());
+        emulator.simulate_stake_call();
+
+        
+        let mut rewards = ntoy(100);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        rewards = ntoy(150);
+        emulator.skip_epochs_and_set_reward(1, rewards);
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, 0);
+        emulator.update_context(b(), 0);
+        emulator.contract.unstake_all();
+
+        emulator.skip_epochs_and_set_reward(1, ntoy(290));
+        emulator.contract.ping();
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        emulator.skip_epochs_and_set_reward(10, ntoy(530));
+        emulator.transfer_from_locked_amount_to_contract_balance(ntoy(210));
+        emulator.contract.ping();
+
+        println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
+        emulator.skip_epochs_and_set_reward(4, 0);
+        emulator.transfer_from_locked_amount_to_contract_balance(ntoy(50));
+        emulator.contract.ping();
+        assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, ntoy(155));
+
+
     }
 }

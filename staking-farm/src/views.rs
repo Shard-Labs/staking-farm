@@ -32,6 +32,14 @@ impl HumanReadableFarm {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ContractBalances{
+    pub last_total_balance: U128,
+    pub locked_balance: U128,
+    pub contract_balance: U128,
+}
+
 /// Represents an account structure readable by humans.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -47,6 +55,8 @@ pub struct HumanReadableAccount {
     /// that have their tokens delegated to a pool which
     /// doesnt restake its rewards
     pub rewards_for_withdraw: U128,
+    /// Rewards that are generated without those that are withdrawn
+    pub possible_rewards: U128,
 }
 
 /// Represents pool summary with all farms and rates applied.
@@ -162,6 +172,11 @@ impl StakingContract {
         self.get_account(account_id).rewards_for_withdraw
     }
 
+    /// Account possible rewards
+    pub fn get_account_possible_rewards(&self, account_id: AccountId) -> U128{
+        self.get_account(account_id).possible_rewards
+    }
+
     /// Returns the unstaked balance of the given account.
     pub fn get_account_unstaked_balance(&self, account_id: AccountId) -> U128 {
         self.get_account(account_id).unstaked_balance
@@ -218,6 +233,24 @@ impl StakingContract {
         self.rewards_staked_staking_pool.accounts.len() + self.rewards_not_staked_staking_pool.accounts.len()
     }
 
+    pub fn get_contract_balances(&self) -> ContractBalances{
+        return ContractBalances {
+            last_total_balance: self.last_total_balance.into(),
+            contract_balance: env::account_balance().into(), 
+            locked_balance: env::account_locked_balance().into()
+        };
+    }
+
+    /// Returns the expected rewards per epoch
+    pub fn get_expected_amounts_for_epoch(&self, epoch: Option<EpochHeight>) -> Balance{
+        return self
+            .rewards_not_staked_staking_pool
+            .expected_rewards_in_epoch
+            .get(&epoch
+                    .unwrap_or(env::epoch_height()))
+            .unwrap_or_default();
+        }
+
     /// Returns the list of accounts
     pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount> {
         let keys = self
@@ -230,13 +263,13 @@ impl StakingContract {
             .map(|index| self.get_account(keys.get(index).unwrap()))
             .collect::<Vec<HumanReadableAccount>>();
 
-        if upper_bound - (result.len() as u64) > 0 {
+        if limit - (result.len() as u64) > 0 {
             let other_keys = self
                 .rewards_not_staked_staking_pool
                 .accounts
                 .keys_as_vector();
                 
-            let other_upper_bound = std::cmp::min(upper_bound - (result.len() as u64), other_keys.len());
+            let other_upper_bound = std::cmp::min(limit - (result.len() as u64), other_keys.len());
             let other_result = (0..other_upper_bound)
                 .map(|index| self.get_account(other_keys.get(index).unwrap()))
                 .collect::<Vec<HumanReadableAccount>>();
