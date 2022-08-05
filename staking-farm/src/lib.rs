@@ -304,6 +304,7 @@ mod tests {
     use near_sdk::serde_json::json;
     use near_sdk::test_utils::{get_created_receipts, testing_env_with_promise_results};
 
+    use crate::staking_pool::StakingPool;
     use crate::staking_utils::Fraction;
     use crate::test_utils::tests::*;
     use crate::test_utils::*;
@@ -871,6 +872,10 @@ mod tests {
 
         rpt.add(Fraction ::new (253413999866417394042330927, total_staked_balance));
 
+        
+        let a = Fraction::new(204574360324123112677640207, 32190000000000000000000000000).multiply(158);
+        assert_eq!(a, 1);
+
     }
 
     #[test]
@@ -1372,6 +1377,153 @@ mod tests {
         emulator.contract.ping();
         assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, ntoy(155));
 
+
+    }
+
+    #[test]
+    fn check_rewards_distribution(){
+        let total_buffered_rewards:u128 =  184923025115118760000000000;
+        let total_rewards:u128          = 1359907904067157000000000000;
+        let rewards_1255:u128           =   15066944857207618000000000;
+        let rewards_1256:u128           =   13884783463660599000000000;
+        let rewards_1257:u128           =   15483461799375686000000000;
+        let rewards_1258:u128           =   15324412464231188000000000;
+
+        let numerator: u128 = 752720774362743900000000000;
+        let denominator:u128 = 17899522103169550000000000000;
+        let rpt = Fraction {numerator: numerator, denominator: denominator};
+
+        let mut pool = InnerStakingPoolWithoutRewardsRestaked::new();
+        pool.total_buffered_rewards = total_buffered_rewards;
+        pool.total_rewards = total_rewards;
+        pool.reward_per_token = rpt;
+        pool.total_staked_balance = 32190000000000000000000000000 + 200000000000000000000000000 + 20000000000000000000000000;
+
+        let nbh_owner_acc_id = AccountId::new_unchecked("nbhowner.testnet".to_string());
+        let mut nbh_owner_acc = pool.accounts.get(&nbh_owner_acc_id).unwrap_or_default();
+
+        let nbh_03_acc_id = AccountId::new_unchecked("nbh-03.testnet".to_string());
+        let mut nbh_03_acc = pool.accounts.get(&nbh_03_acc_id).unwrap_or_default();
+
+        let nbh_user_acc_id = AccountId::new_unchecked("nbh-user.testnet".to_string());
+        let mut nbh_user_acc = pool.accounts.get(&nbh_user_acc_id).unwrap_or_default();
+
+        nbh_user_acc.stake_shares = 20000000000000000000000000;
+        nbh_user_acc.payed_reward = 94302089549655460000000;
+        nbh_user_acc.reward_tally = 145917488355717810000000;
+
+        pool.accounts.insert(&nbh_user_acc_id, &nbh_user_acc);
+
+        nbh_03_acc.stake_shares = 200000000000000000000000000;
+        nbh_03_acc.unstaked = 125000000000000000000000000;
+        nbh_03_acc.payed_reward = 695194966937340700000000;
+        nbh_03_acc.reward_tally = 3261134754759438600000000;
+
+        pool.accounts.insert(&nbh_03_acc_id, &nbh_03_acc);
+
+        nbh_owner_acc.stake_shares           = 32190000000000000000000000000;
+        nbh_owner_acc.payed_reward    = 152047581397091040000000000;
+        nbh_owner_acc.reward_tally    = 232902872840820800000000000;
+        pool.accounts.insert(&nbh_owner_acc_id, &nbh_owner_acc);
+
+        let mut possible_reward = pool.compute_possible_reward(&nbh_owner_acc);
+        let mut reward_for_withdraw = pool.compute_reward(&nbh_owner_acc);
+        assert_eq_in_near!(possible_reward, 968721536951517602387376369);
+        assert_eq_in_near!(reward_for_withdraw, 356868345995048851624781);
+
+        possible_reward = pool.compute_possible_reward((&nbh_03_acc));
+        reward_for_withdraw = pool.compute_reward(&nbh_03_acc);
+        assert_eq_in_near!(possible_reward, 4454182805109243929028098);
+        assert_eq_in_near!(reward_for_withdraw, 5027829194283821991497);
+
+        possible_reward = pool.compute_possible_reward((&nbh_user_acc));
+        reward_for_withdraw = pool.compute_reward(&nbh_user_acc);
+        assert_eq_in_near!(possible_reward, 600831674775229057007018);
+        assert_eq_in_near!(reward_for_withdraw, 223604561075420256486);
+
+        let mut withdrawn_rewards =0u128;
+        withdrawn_rewards = pool.withdraw_not_staked_rewards(&nbh_owner_acc_id).0;
+        withdrawn_rewards = pool.withdraw_not_staked_rewards(&nbh_03_acc_id).0;
+        withdrawn_rewards = pool.withdraw_not_staked_rewards(&nbh_user_acc_id).0;
+
+        reward_for_withdraw = pool.get_account_info(&nbh_owner_acc_id).rewards_for_withdraw.0;
+        assert_eq!(reward_for_withdraw, 0);
+        reward_for_withdraw = pool.get_account_info(&nbh_user_acc_id).rewards_for_withdraw.0;
+        assert_eq!(reward_for_withdraw, 0);
+        reward_for_withdraw = pool.get_account_info(&nbh_03_acc_id).rewards_for_withdraw.0;
+        assert_eq!(reward_for_withdraw, 0);
+
+        let rewards_for_epochs = vec![rewards_1255, rewards_1256, rewards_1257, rewards_1258];
+        
+        let mut starting_epoch=1254;
+        for r in &rewards_for_epochs{
+            starting_epoch+=1;
+            pool.expected_rewards_in_epoch.insert(&starting_epoch, &r);
+        }
+
+        pool.calculate_rewards_ready_to_buffer(starting_epoch);
+
+        reward_for_withdraw += pool.get_account_info(&nbh_owner_acc_id).rewards_for_withdraw.0;
+        reward_for_withdraw += pool.get_account_info(&nbh_03_acc_id).rewards_for_withdraw.0;
+        reward_for_withdraw += pool.get_account_info(&nbh_user_acc_id).rewards_for_withdraw.0;
+
+        assert_eq!(pool.total_buffered_rewards - total_buffered_rewards, rewards_1255 + rewards_1256 + rewards_1257 + rewards_1258);
+        println!("{} \n{}", rewards_1255 + rewards_1256 + rewards_1257 + rewards_1258, reward_for_withdraw);
+        assert!(rewards_1255 + rewards_1256 + rewards_1257 + rewards_1258 >= reward_for_withdraw);
+
+    }
+
+    #[test]
+    fn get_accounts_test(){
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(initial_balance),
+        );
+
+        let a_deposit_amount = ntoy(50);
+        let b_deposit_amount = ntoy(100);
+        let c_deposit_amount = ntoy(60);
+        let e_deposit_amount = ntoy(40);
+        // A deposits and stakes all
+        emulator.deposit_and_stake_rewards_not_stake(a(), a_deposit_amount);
+
+        // B deposits and stakes 50/100
+        emulator.update_context(b(), b_deposit_amount);
+        emulator.contract.deposit_rewards_not_stake();
+        emulator.amount += b_deposit_amount;
+        let b_stake_amount = b_deposit_amount * 5 / 10;
+        emulator.contract.stake((b_stake_amount).into());
+        emulator.simulate_stake_call();
+
+        let mut accs = emulator.contract.get_accounts(0, 100);
+        assert_eq!(accs.len(), 2);
+        assert_eq!(accs.get(1).unwrap().account_id, b());
+
+        emulator.update_context(c(), c_deposit_amount);
+        emulator.contract.deposit_and_stake_rewards_not_stake();
+        emulator.amount += c_deposit_amount;
+        emulator.simulate_stake_call();
+
+        accs = emulator.contract.get_accounts(1, 2);
+        assert_eq!(accs.len(), 2);
+        assert_eq!(accs.get(0).unwrap().account_id, b());
+
+        // E deposits and stakes all
+        emulator.update_context(e(), e_deposit_amount);
+        emulator.contract.deposit_rewards_not_stake();
+        emulator.amount += e_deposit_amount;
+        emulator.contract.stake_all();
+        emulator.simulate_stake_call();
+
+        accs = emulator.contract.get_accounts(0, 4);
+        assert_eq!(accs.len(), 4);
+        accs = emulator.contract.get_accounts(1, 4);
+        assert_eq!(accs.len(), 3);
+        assert_eq!(accs.get(2).unwrap().account_id, e());
 
     }
 }
