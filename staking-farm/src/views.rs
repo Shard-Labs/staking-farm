@@ -252,29 +252,20 @@ impl StakingContract {
         }
 
     /// Returns the list of accounts
-    pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount> {
-        let keys = self
-            .rewards_staked_staking_pool
-            .accounts
-            .keys_as_vector();
-        let upper_bound = std::cmp::min(from_index + limit, keys.len());
-
-        let mut result = (from_index..upper_bound)
-            .map(|index| self.get_account(keys.get(index).unwrap()))
-            .collect::<Vec<HumanReadableAccount>>();
-
-        if limit - (result.len() as u64) > 0 {
-            let other_keys = self
-                .rewards_not_staked_staking_pool
-                .accounts
-                .keys_as_vector();
-                
-            let other_upper_bound = std::cmp::min(limit - (result.len() as u64), other_keys.len());
-            let other_result = (0..other_upper_bound)
-                .map(|index| self.get_account(other_keys.get(index).unwrap()))
-                .collect::<Vec<HumanReadableAccount>>();
-            result.extend(other_result);
-        }
+    pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount>{
+        let result = self.account_pool_register
+                            .iter()
+                            .filter(|(acc_id, _)| *acc_id != self.get_owner_id() && *acc_id != AccountId::new_unchecked(ZERO_ADDRESS.to_string() ))
+                            .skip(from_index.try_into().unwrap())
+                            .take(limit.try_into().unwrap())
+                            .map(|(acc_id, is_staking)|{
+                                if is_staking{
+                                    self.rewards_staked_staking_pool.get_account_info(&acc_id)
+                                }else{
+                                    self.rewards_not_staked_staking_pool.get_account_info(&acc_id)
+                                }
+                            })
+                            .collect::<Vec<HumanReadableAccount>>();
 
         return result;
     }
