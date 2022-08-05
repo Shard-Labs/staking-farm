@@ -56,7 +56,7 @@ pub struct AccountWithReward{
     /// NOTE: The number of shares should always be less or equal than the amount of staked balance.
     /// This means the price of stake share should always be at least `1`.
     /// The price of stake share can be computed as `total_staked_balance` / `total_stake_shares`.
-    pub stake: Balance,
+    pub stake_shares: Balance,
     /// The minimum epoch height when the withdrawn is allowed.
     /// This changes after unstaking action, because the amount is still locked for 3 epochs.
     pub unstaked_available_epoch_height: EpochHeight,
@@ -76,7 +76,7 @@ impl Default for AccountWithReward {
     fn default() -> Self {
         Self {
             unstaked: 0,
-            stake: 0,
+            stake_shares: 0,
             unstaked_available_epoch_height: 0,
             reward_tally: 0,
             tally_below_zero: false,
@@ -173,7 +173,7 @@ impl AccountImpl for Account{
 
 impl AccountImpl for AccountWithReward{
     fn get_account_stake_shares(&self) -> NumStakeShares{
-        return self.stake;
+        return self.stake_shares;
     }
 
     fn is_burn_account(&self) -> bool {

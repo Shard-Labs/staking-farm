@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{UnorderedMap, UnorderedSet, Vector};
 use near_sdk::json_types::U128;
@@ -14,7 +13,8 @@ use crate::account::{NumStakeShares, Account};
 use crate::farm::Farm;
 use crate::internal::ZERO_ADDRESS;
 use crate::staking_pool::{InnerStakingPool, InnerStakingPoolWithoutRewardsRestaked};
-pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary, ContractBalances, ExpectedTokensInFuture};
+pub use crate::views::{HumanReadableAccount, HumanReadableFarm, PoolSummary, ContractBalances };
+pub use crate::staking_utils::Ratio;
 
 mod staking_pool;
 mod account;
@@ -22,6 +22,7 @@ mod farm;
 mod internal;
 mod owner;
 mod stake;
+mod staking_utils;
 #[cfg(test)]
 mod test_utils;
 mod token_receiver;
@@ -113,55 +114,6 @@ impl UpdatableRewardFee {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize)]
-pub struct PrevoiusVersionStakingContract {
-    /// The public key which is used for staking action. It's the public key of the validator node
-    /// that validates on behalf of the pool.
-    pub stake_public_key: PublicKey,
-    /// The last epoch height when `ping` was called.
-    pub last_epoch_height: EpochHeight,
-    /// The last total balance of the account (consists of staked and unstaked balances).
-    pub last_total_balance: Balance,
-    /// The last available unlocked balance in contract
-    pub last_balance_in_contract: Balance,
-    /// the structure contains on which epoch, what amount of tokens are expected
-    /// to arrive after unstaking a specific amount of tokens. They are received as part of the account balance
-    /// because there is not an actual transaction for the unstaking. The structure will collect the optimistic
-    /// arrival time of tokens, usualy 3 epochs, but because the promise could arrive at the next epoch so
-    /// it could take 4 epochs.
-    /// First part of tuple is for amount from unstaking, the second is for not staked rewards
-    pub optimistic_expected_tokens: UnorderedMap<EpochHeight, ExpectedTokensInEpoch>,
-    /// The total amount to burn that will be available.
-    /// The fraction of the reward that goes to the owner of the staking pool for running the
-    /// validator node.
-    pub reward_fee_fraction: UpdatableRewardFee,
-    /// The fraction of the reward that gets burnt.
-    pub burn_fee_fraction: Ratio,
-    /// Farm tokens.
-    pub farms: Vector<Farm>,
-    /// Active farms: indicies into `farms`.
-    pub active_farms: Vec<u64>,
-    /// Whether the staking is paused.
-    /// When paused, the account unstakes everything (stakes 0) and doesn't restake.
-    /// It doesn't affect the staking shares or reward distribution.
-    /// Pausing is useful for node maintenance. Only the owner can pause and resume staking.
-    /// The contract is not paused by default.
-    pub paused: bool,
-    /// Authorized users, allowed to add farms.
-    /// This is done to prevent farm spam with random tokens.
-    /// Should not be a large number.
-    pub authorized_users: UnorderedSet<AccountId>,
-    /// Authorized tokens for farms.
-    /// Required because any contract can call method with ft_transfer_call, so must verify that contract will accept it.
-    pub authorized_farm_tokens: UnorderedSet<AccountId>,
-    /// Inner staking pool, that restakes the received rewards
-    pub rewards_staked_staking_pool: InnerStakingPool,
-    /// Inner staking pool, that doesnt restake rewards
-    pub rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked,
-    /// Map showing whether account has his rewards staked or unstaked
-    pub account_pool_register: UnorderedMap<AccountId, bool>,
-}
-
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct StakingContract {
@@ -172,13 +124,6 @@ pub struct StakingContract {
     pub last_epoch_height: EpochHeight,
     /// The last total balance of the account (consists of staked and unstaked balances).
     pub last_total_balance: Balance,
-    /// the structure contains on which epoch, what amount of tokens are expected
-    /// to arrive after unstaking a specific amount of tokens. They are received as part of the account balance
-    /// because there is not an actual transaction for the unstaking. The structure will collect the optimistic
-    /// arrival time of tokens, usualy 3 epochs, but because the promise could arrive at the next epoch so
-    /// it could take 4 epochs.
-    /// First part of tuple is for amount from unstaking, the second is for not staked rewards
-    pub expected_rewards_in_epoch: UnorderedMap<EpochHeight, Balance>,
     /// The total amount to burn that will be available.
     /// The fraction of the reward that goes to the owner of the staking pool for running the
     /// validator node.
@@ -216,44 +161,7 @@ impl Default for StakingContract {
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Clone, PartialEq, Debug)]
-pub struct ExpectedTokensInEpoch{
-    pub unstaked_amount: Balance,
-    pub not_staked_reward_amount: Balance,
-}
-
-impl Default for ExpectedTokensInEpoch{
-    fn default() -> Self{
-        Self { unstaked_amount: 0, not_staked_reward_amount: 0 }
-    }
-}
-
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, PartialEq, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct Ratio {
-    pub numerator: u32,
-    pub denominator: u32,
-}
-
-impl Ratio {
-    pub fn assert_valid(&self) {
-        assert_ne!(self.denominator, 0, "Denominator must be a positive number");
-        assert!(
-            self.numerator <= self.denominator,
-            "The reward fee must be less or equal to 1"
-        );
-    }
-
-    pub fn multiply(&self, value: Balance) -> Balance {
-        if self.denominator == 0 || self.numerator == 0 {
-            0
-        } else {
-            (U256::from(self.numerator) * U256::from(value) / U256::from(self.denominator))
-                .as_u128()
-        }
-    }
-}
-
+/// Old struct https://github.com/referencedev/staking-farm
 #[derive(BorshDeserialize, BorshSerialize)]
 pub struct OldStakingContract {
     /// The public key which is used for staking action. It's the public key of the validator node
@@ -299,35 +207,6 @@ pub struct OldStakingContract {
 
 #[near_bindgen]
 impl StakingContract {
-
-    #[init(ignore_state)]
-    pub fn migrate_from_previous_state() -> Self{
-        let old_state: PrevoiusVersionStakingContract = env::state_read().expect("failed");
-
-        let mut this = Self{
-            stake_public_key: old_state.stake_public_key,
-            last_epoch_height: old_state.last_epoch_height,
-            expected_rewards_in_epoch: UnorderedMap::new(StorageKeys::ExpectedTokensInEpoch),
-            last_total_balance: old_state.last_total_balance,
-            reward_fee_fraction: old_state.reward_fee_fraction,
-            burn_fee_fraction: old_state.burn_fee_fraction,
-            farms: old_state.farms,
-            active_farms: old_state.active_farms,
-            paused: old_state.paused,
-            authorized_users: old_state.authorized_users,
-            authorized_farm_tokens: old_state.authorized_farm_tokens,
-            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
-            rewards_not_staked_staking_pool: old_state.rewards_not_staked_staking_pool,
-            account_pool_register: old_state.account_pool_register,
-        };
-
-        for el in old_state.optimistic_expected_tokens.to_vec(){
-            this.expected_rewards_in_epoch.insert(&el.0, &el.1.not_staked_reward_amount);
-        }
-
-        return this;
-    }
-
     #[private]
     #[init(ignore_state)]
     pub fn migrate_state() -> Self{
@@ -336,7 +215,6 @@ impl StakingContract {
         let mut this = Self{
             stake_public_key: old_state.stake_public_key,
             last_epoch_height: old_state.last_epoch_height,
-            expected_rewards_in_epoch: UnorderedMap::new(StorageKeys::ExpectedTokensInEpoch),
             last_total_balance: old_state.last_total_balance,
             reward_fee_fraction: old_state.reward_fee_fraction,
             burn_fee_fraction: old_state.burn_fee_fraction,
@@ -389,7 +267,6 @@ impl StakingContract {
             stake_public_key: stake_public_key.into(),
             last_epoch_height: env::epoch_height(),
             last_total_balance: account_balance,
-            expected_rewards_in_epoch: UnorderedMap::new(StorageKeys::ExpectedTokensInEpoch),
             reward_fee_fraction: UpdatableRewardFee::new(reward_fee_fraction),
             burn_fee_fraction,
             farms: Vector::new(StorageKeys::Farms),
@@ -427,7 +304,7 @@ mod tests {
     use near_sdk::serde_json::json;
     use near_sdk::test_utils::{get_created_receipts, testing_env_with_promise_results};
 
-    use crate::staking_pool::Fraction;
+    use crate::staking_utils::Fraction;
     use crate::test_utils::tests::*;
     use crate::test_utils::*;
 

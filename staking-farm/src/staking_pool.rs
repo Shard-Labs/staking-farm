@@ -6,6 +6,8 @@ use crate::account::{Account, AccountWithReward, AccountImpl, NumStakeShares};
 use crate::{StorageKeys};
 use uint::construct_uint;
 use crate::views::HumanReadableAccount;
+use crate::staking_utils::Fraction;
+
 construct_uint! {
     /// 256-bit unsigned integer.
     pub struct U256(4);
@@ -57,101 +59,11 @@ pub struct InnerStakingPoolWithoutRewardsRestaked{
     pub total_rewards: Balance,
     /// the amount of rewards that are actually unlocked and are in the contract
     pub total_buffered_rewards: Balance,
-}
-
-#[derive(BorshDeserialize, BorshSerialize, PartialEq, Eq, Debug)]
-pub struct Fraction{
-    pub numerator: u128,
-    pub denominator: u128,
-}
-
-impl Default for Fraction{
-    fn default() -> Self {
-        Self {
-            numerator: 0,
-            denominator: 1,
-        }
-    }
-}
-
-impl Fraction{
-    pub fn new(
-        numerator: u128, 
-        denominator: u128
-    )-> Self{
-        assert!(denominator != 0 || (numerator == 0 && denominator == 0), "Denominator can only be 0 if numerator is 0");
-
-        let smaller_part = std::cmp::min(numerator, denominator);
-        let power: u32;
-
-        if (smaller_part / u128::pow(10, 12)) >= 100 {
-            power = 12;
-        } else if smaller_part / u128::pow(10, 6) >= 100 { 
-            power = 6;
-        } else if smaller_part / u128::pow(10, 3) >= 100 {
-            power = 3;
-        } else {
-            power = 0;
-        }
-        let delimiter = u128::pow(10, power);
-
-        let this = Self { numerator: numerator / delimiter, denominator: denominator / delimiter };
-
-        return this;
-    }
-    pub fn add(&mut self, value: Fraction)-> &mut Self{
-        if value == Fraction::default(){
-            //do nothing
-        }else if *self == Fraction::default(){
-            self.numerator = value.numerator;
-            self.denominator = value.denominator;
-        }else {   
-            // Finding greatest common divisor of the two denominators
-            let gcd = self.greatest_common_divisior(self.denominator,value.denominator);      
-            let new_denominator = ((U256::from(self.denominator) * U256::from(value.denominator)) / U256::from(gcd)).as_u128();
-        
-            // Changing the fractions to have same denominator
-            // Numerator of the final fraction obtained
-            self.numerator = (self.numerator) * (new_denominator / self.denominator) 
-                    + (value.numerator) * (new_denominator / value.denominator);
-            self.denominator = new_denominator;
-        }
-        // Calling function to convert final fraction
-        // into it's simplest form
-        self.simple_form();
-
-        return self;
-    }
-
-    pub fn multiply(&self, value: Balance) -> Balance {
-        if self.numerator == 0 && self.denominator == 0 {
-            return 0;
-        }
-
-        return (U256::from(self.numerator) * U256::from(value) / U256::from(self.denominator)).as_u128()
-    }
-
-    fn simple_form(&mut self) -> &Self{
-        if *self == Fraction::default(){
-            return self;
-        }
-        let common_factor = self.greatest_common_divisior(self.numerator, self.denominator);
-        self.denominator = self.denominator/common_factor;
-        self.numerator = self.numerator/common_factor;
-
-        return self;
-    }
-
-    fn greatest_common_divisior(
-        &self, 
-        a: u128, 
-        b: u128
-    ) -> u128{
-        if a == 0{
-            return b;
-        }
-        return self.greatest_common_divisior(b%a, a);
-    }
+    /// the structure contains the rewards generated per epoch and are not yet available to
+    /// withdraw. Those rewards are deleted from this mapping after they are included in
+    /// `total_buffered_rewards`. The condition to include them is that the `epoch_height`
+    /// must be epoch_height - 4 <= current_epoch_height.
+    pub expected_rewards_in_epoch: UnorderedMap<EpochHeight, Balance>,
 }
 
 impl InnerStakingPool{
@@ -272,6 +184,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
             total_buffered_rewards: 0,
             total_rewards: 0,
             accounts: UnorderedMap::new(StorageKeys::AccountsNotStakedStakingPool),
+            expected_rewards_in_epoch: UnorderedMap::new(StorageKeys::ExpectedTokensInEpoch),
         };
     }
 
@@ -285,7 +198,7 @@ impl InnerStakingPoolWithoutRewardsRestaked{
     /// Returns true or false, wether the account was removeds
     pub(crate) fn internal_save_account(&mut self, account_id: &AccountId, account: &AccountWithReward) -> bool{
         if account.unstaked > 0 || 
-            account.stake > 0 || 
+            account.stake_shares > 0 || 
             account.amounts.len() > 0 || 
             ( account.reward_tally - account.payed_reward ) != 0 {
             self.accounts.insert(account_id, &account);
@@ -296,39 +209,56 @@ impl InnerStakingPoolWithoutRewardsRestaked{
         }
     }
 
-    pub(crate) fn distribute_reward(&mut self, reward:Balance, is_buffered: bool){
+    /// Calculates the total rewards ready to be buffered.
+    /// Returns the accumulated rewards that is ready to be claimed by the stakers.
+    pub(crate) fn calculate_rewards_ready_to_buffer(&mut self, last_epoch_height: u64){
+        let mut accumulated_rewards_from_not_staking_rewards: Balance = 0;
+
+        let rewards_in_epoch = self.expected_rewards_in_epoch
+            .iter()
+            .filter(|el| (*el).0 <= last_epoch_height)
+            .collect::<Vec<(u64, Balance)>>();
+
+        for reward in rewards_in_epoch{
+            accumulated_rewards_from_not_staking_rewards += reward.1;
+
+            self.expected_rewards_in_epoch.remove(&reward.0);
+        }
+
+        self.total_buffered_rewards += accumulated_rewards_from_not_staking_rewards;
+    }
+
+    /// Distribute rewards by updating the reward_per_token 
+    pub(crate) fn distribute_reward(&mut self, reward:Balance){
         if reward == 0{
             return;
         }
-        assert!(self.total_staked_balance > 0, "Cannot distribute reward when staked balance is 0 or below");
-
-        if is_buffered {
-            self.total_buffered_rewards += reward;
-        } else {
-            self.total_rewards += reward;
-            self.reward_per_token.add(Fraction::new(reward, self.total_staked_balance));
-        }
+        assert!(self.total_staked_balance > 0, "Cannot distribute reward when staked balance is 0");
+        self.total_rewards += reward;
+        self.reward_per_token.add(Fraction::new(reward, self.total_staked_balance));
     }
 
+    /// Calculate the total reward that a staker generated.
     pub(crate) fn compute_possible_reward(&self, account: &AccountWithReward) -> Balance {
         let reward: Balance;
         if account.tally_below_zero {
-            reward = self.reward_per_token.multiply(account.stake) + account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake_shares) + account.reward_tally;
         }else{
-            reward = self.reward_per_token.multiply(account.stake) - account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake_shares) - account.reward_tally;
         }
 
         return reward - account.payed_reward;
     }
 
+    /// Calculate the total reward that a staker can withdraw during the current epoch.
     pub(crate) fn compute_reward(&self, account: &AccountWithReward) -> Balance{
         let reward: Balance;
         let buffered_rewards_ratio = Fraction::new(self.total_buffered_rewards, self.total_rewards );
 
         if account.tally_below_zero {
-            reward = self.reward_per_token.multiply(account.stake) + account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake_shares) + account.reward_tally;
         }else{
-            reward = self.reward_per_token.multiply(account.stake) - account.reward_tally;
+            reward = self.reward_per_token.multiply(account.stake_shares) - account.reward_tally;
         }
 
         return buffered_rewards_ratio.multiply(reward) - account.payed_reward;
@@ -550,7 +480,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
     fn get_account_info(&self, account_id: &AccountId) -> HumanReadableAccount {
         let account = self.internal_get_account(&account_id);
         let rewards_for_withdraw = 
-            if account.stake == 0 {
+            if account.stake_shares == 0 {
                 account.reward_tally - account.payed_reward
             }else {
                 self.compute_reward(&account)
@@ -558,7 +488,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
         return HumanReadableAccount {
             account_id: account_id.clone(),
             unstaked_balance: account.unstaked.into(),
-            staked_balance: account.stake.into(),
+            staked_balance: account.stake_shares.into(),
             can_withdraw: account.unstaked_available_epoch_height <= env::epoch_height(),
             rewards_for_withdraw: rewards_for_withdraw.into(),
             possible_rewards: self.compute_possible_reward(&account).into(),
@@ -581,7 +511,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
 
     fn withdraw_not_staked_rewards(&mut self, account_id: &AccountId) -> (Balance, bool){
         let mut account = self.internal_get_account(&account_id);
-        if account.stake == 0 {
+        if account.stake_shares == 0 {
             assert!(
                 account.unstaked_available_epoch_height <= env::epoch_height(),
                 "The unstaked balance is not yet available due to unstaking delay"
@@ -632,7 +562,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
                                         .downcast_mut::<AccountWithReward>()
                                         .unwrap();
         account.unstaked -= amount;
-        account.stake += amount;
+        account.stake_shares += amount;
         account.add_to_tally(self.reward_per_token.multiply(amount));
         self.total_staked_balance+=amount;
 
@@ -640,7 +570,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
 
         log!(
             "@{} staking {}. Total {} unstaked balance and {} staked amount",
-            account_id, amount, account.unstaked, account.stake
+            account_id, amount, account.unstaked, account.stake_shares
         );
 
         return amount;
@@ -661,11 +591,11 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
             "The unstaking amount should be positive"
         );
         assert!(
-            account.stake >= amount,
+            account.stake_shares >= amount,
             "Not enough staked balance to unstake"
         );
 
-        account.stake -= amount;
+        account.stake_shares -= amount;
         account.unstaked += amount;
         account.subtract_from_tally(self.reward_per_token.multiply(amount));
         account.unstaked_available_epoch_height = env::epoch_height() + NUM_EPOCHS_TO_UNLOCK;
@@ -675,7 +605,7 @@ impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
 
         log!(
             "@{} unstaking {}. Total {} unstaked balance and {} staking amount",
-            account_id, amount, account.unstaked, account.stake
+            account_id, amount, account.unstaked, account.stake_shares
         );
         log!(
             "Contract inner staking pool total staked balance is {}",

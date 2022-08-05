@@ -65,15 +65,15 @@ impl StakingContract {
 
         let account_id = env::predecessor_account_id();
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
-        let staked_amount: Balance;
+
         if account_staking_rewards {
             let mut account = self.rewards_staked_staking_pool.get_account_impl(&account_id);
             self.internal_distribute_all_rewards(account.as_mut(), true);
-            staked_amount = self.rewards_staked_staking_pool.stake(&account_id, amount, account.as_mut());
+            self.rewards_staked_staking_pool.stake(&account_id, amount, account.as_mut());
         } else {
             let mut account = self.rewards_not_staked_staking_pool.get_account_impl(&account_id);
             self.internal_distribute_all_rewards(account.as_mut(), false);
-            staked_amount = self.rewards_not_staked_staking_pool.stake(&account_id, amount, account.as_mut());
+            self.rewards_not_staked_staking_pool.stake(&account_id, amount, account.as_mut());
         }
     }
 
@@ -113,28 +113,6 @@ impl StakingContract {
         }
     }
 
-    /// Calculates how much of the contract balance is received based on not staking rewards from previous epoch
-    /// and unstaking
-    /// Returns the accumulated rewards that should be distributed
-    fn internal_calculate_received_tokens_from_blockchain(&mut self) -> Balance{
-        let mut accumulated_rewards_from_not_staking_rewards: Balance = 0;
-
-        // if ping is not being called for some time
-        // there would be some epochs 
-        let passed_epochs = self.expected_rewards_in_epoch
-            .iter()
-            .filter(|el| (*el).0 <= self.last_epoch_height)
-            .collect::<Vec<(u64, Balance)>>();
-
-        for passed in passed_epochs{
-            accumulated_rewards_from_not_staking_rewards += passed.1;
-
-            self.expected_rewards_in_epoch.remove(&passed.0);
-        }
-
-        return accumulated_rewards_from_not_staking_rewards;
-    }
-
     /// Distributes rewards after the new epoch. It's automatically called before every action.
     /// Returns true if the current epoch height is different from the last epoch height.
     pub(crate) fn internal_ping(&mut self) -> bool {
@@ -159,8 +137,7 @@ impl StakingContract {
             self.last_total_balance
         );
 
-        let accumulated_rewards_from_previous_epochs = self.internal_calculate_received_tokens_from_blockchain();
-        self.rewards_not_staked_staking_pool.distribute_reward(accumulated_rewards_from_previous_epochs, true);
+        self.rewards_not_staked_staking_pool.calculate_rewards_ready_to_buffer(epoch_height);
 
         let total_reward = total_balance - self.last_total_balance;
         if total_reward > 0 {
@@ -182,10 +159,10 @@ impl StakingContract {
                 self.rewards_not_staked_staking_pool.total_staked_balance);
 
             self
-                .expected_rewards_in_epoch
+                .rewards_not_staked_staking_pool.expected_rewards_in_epoch
                 .insert(&(self.last_epoch_height + NUM_EPOCHS_TO_UNLOCK), &not_staked_rewards);
 
-            self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards, false);
+            self.rewards_not_staked_staking_pool.distribute_reward(not_staked_rewards);
             self.rewards_staked_staking_pool.total_staked_balance += remaining_reward - not_staked_rewards;
 
             // Now buying "stake" shares for the burn.

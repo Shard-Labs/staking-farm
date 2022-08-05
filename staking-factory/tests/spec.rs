@@ -225,17 +225,6 @@ fn test_staking_pool_upgrade_from_2_0_0() {
 
     create_staking_pool(&root, &factory, hash_2_0_0).assert_success();
 
-    let version_through_call: String = root
-        .call(
-            AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
-            "get_version",
-            &[],
-            near_sdk_sim::DEFAULT_GAS,
-            0,
-        )
-        .unwrap_json();
-    assert_eq!(version_through_call, "staking-farm:2.0.0");
-
     // Upgrade staking pool.
     assert_all_success(root.call(
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),

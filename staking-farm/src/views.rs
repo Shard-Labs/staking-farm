@@ -40,13 +40,6 @@ pub struct ContractBalances{
     pub contract_balance: U128,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct ExpectedTokensInFuture{
-    pub unstaked_amount: U128,
-    pub not_staked_reward_amount: U128,
-}
-
 /// Represents an account structure readable by humans.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -248,8 +241,10 @@ impl StakingContract {
         };
     }
 
+    /// Returns the expected rewards per epoch
     pub fn get_expected_amounts_for_epoch(&self, epoch: Option<EpochHeight>) -> Balance{
         return self
+            .rewards_not_staked_staking_pool
             .expected_rewards_in_epoch
             .get(&epoch
                     .unwrap_or(env::epoch_height()))

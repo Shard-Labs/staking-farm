@@ -9,7 +9,7 @@ use near_sdk_sim::{
 
 use near_sdk_sim::num_rational::Rational;
 use staking_farm::{
-    HumanReadableAccount, HumanReadableFarm, PoolSummary, Ratio, StakingContractContract, ContractBalances, ExpectedTokensInFuture, STAKE_SHARE_PRICE_GUARANTEE_FUND
+    HumanReadableAccount, HumanReadableFarm, PoolSummary, Ratio, StakingContractContract, ContractBalances, STAKE_SHARE_PRICE_GUARANTEE_FUND
 };
 
 type PoolContract = ContractAccount<StakingContractContract>;
