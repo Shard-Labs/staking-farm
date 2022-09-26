@@ -307,7 +307,7 @@ pub extern "C" fn migrate() {
     // Will fail migration in the case of trying to skip the versions.
     assert_eq!(
         StakingContract::internal_get_state_version(),
-        "staking-farm:2.0.0"
+        "staking-farm:1.1.0"
     );
 
     // migrate the state
