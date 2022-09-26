@@ -309,5 +309,9 @@ pub extern "C" fn migrate() {
         StakingContract::internal_get_state_version(),
         "staking-farm:2.0.0"
     );
+
+    // migrate the state
+    StakingContract::migrate_state();
+
     StakingContract::internal_set_version();
 }
