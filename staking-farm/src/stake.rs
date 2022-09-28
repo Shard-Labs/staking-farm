@@ -26,6 +26,12 @@ pub trait SelfContract {
         delegator_id: AccountId,
         account_id: AccountId,
     ) -> Promise;
+
+    fn callback_post_stop_farm_transfer_tokens(
+        &mut self,
+        farm_id: u64,
+        farm: Farm,
+    );
 }
 
 #[near_bindgen]

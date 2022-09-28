@@ -19,7 +19,8 @@ pub const GAS_LEFTOVERS: Gas = Gas(20_000_000_000_000);
 /// Get owner method on external contracts.
 pub const GET_OWNER_METHOD: &str = "get_owner_account_id";
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
 pub struct RewardDistribution {
     pub undistributed: Balance,
     /// DEPRECATED: Unused.
@@ -29,7 +30,8 @@ pub struct RewardDistribution {
     pub reward_round: u64,
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
 pub struct Farm {
     pub name: String,
     pub token_id: AccountId,
@@ -368,6 +370,18 @@ impl StakingContract {
         }
     }
 
+    #[private]
+    pub fn callback_post_stop_farm_transfer_tokens(
+        &mut self,
+        farm_id: u64,
+        farm: Farm,
+    ){
+        // if transfer of tokens was successful, replace the farm data
+        if is_promise_success(){
+            self.farms.replace(farm_id, &farm);
+        }
+    }
+
     /// Claim given tokens for given account.
     /// If delegator is provided, it will call it's `get_owner` method to confirm that caller
     /// can execute on behalf of this contract.
@@ -408,7 +422,7 @@ impl StakingContract {
         };
         farm.amount -= leftover_amount;
         farm.last_distribution.undistributed = 0;
-        self.farms.replace(farm_id, &farm);
+        
         ext_fungible_token::ft_transfer(
             StakingContract::internal_get_owner_id(),
             U128(leftover_amount),
@@ -416,6 +430,12 @@ impl StakingContract {
             farm.token_id.clone(),
             1,
             GAS_FOR_FT_TRANSFER,
-        )
+        ).then(ext_self::callback_post_stop_farm_transfer_tokens(
+            farm_id,
+            farm,
+            env::current_account_id(),
+            0,
+            GAS_FOR_RESOLVE_TRANSFER,
+        ))
     }
 }

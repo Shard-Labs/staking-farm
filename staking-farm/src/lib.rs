@@ -49,7 +49,8 @@ const NUM_EPOCHS_TO_UNLOCK: EpochHeight = 4;
 
 construct_uint! {
     /// 256-bit unsigned integer.
-    #[derive(BorshSerialize, BorshDeserialize)]
+    #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+    #[serde(crate = "near_sdk::serde")]
     pub struct U256(4);
 }
 
