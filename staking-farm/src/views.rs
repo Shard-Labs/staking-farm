@@ -19,7 +19,7 @@ pub struct HumanReadableFarm {
 }
 
 impl HumanReadableFarm {
-    fn from(farm_id: u64, farm: Farm) -> Self {
+    pub (crate) fn from(farm_id: u64, farm: Farm) -> Self {
         let active = farm.is_active();
         HumanReadableFarm {
             farm_id,

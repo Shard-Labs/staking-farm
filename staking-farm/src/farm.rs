@@ -30,7 +30,7 @@ pub struct RewardDistribution {
     pub reward_round: u64,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Farm {
     pub name: String,
@@ -376,9 +376,10 @@ impl StakingContract {
         farm_id: u64,
         farm: Farm,
     ){
-        // if transfer of tokens was successful, replace the farm data
-        if is_promise_success(){
-            self.farms.replace(farm_id, &farm);
+        // if transfer of tokens was not successful, replace the farm data with the passed farm,
+        // the farm that was sent should be in the initial state
+        if !is_promise_success(){
+            self.farms.replace(farm_id, &farm);    
         }
     }
 
@@ -411,6 +412,7 @@ impl StakingContract {
     pub fn stop_farm(&mut self, farm_id: u64) -> Promise {
         self.assert_owner();
         let mut farm = self.internal_get_farm(farm_id);
+        let farm_initial_state: Farm = farm.clone();
         let leftover_amount = if let Some(distribution) = self.internal_calculate_distribution(
             &farm,
         ) {
@@ -422,7 +424,8 @@ impl StakingContract {
         };
         farm.amount -= leftover_amount;
         farm.last_distribution.undistributed = 0;
-        
+        self.farms.replace(farm_id, &farm);
+
         ext_fungible_token::ft_transfer(
             StakingContract::internal_get_owner_id(),
             U128(leftover_amount),
@@ -432,10 +435,128 @@ impl StakingContract {
             GAS_FOR_FT_TRANSFER,
         ).then(ext_self::callback_post_stop_farm_transfer_tokens(
             farm_id,
-            farm,
+            farm_initial_state,
             env::current_account_id(),
             0,
             GAS_FOR_RESOLVE_TRANSFER,
         ))
+    }
+}
+
+#[cfg(test)]
+mod farm_tests {
+    use super::Farm;
+    use super::*;
+
+    #[test]
+    fn farms_test(){
+        let mut farms = Vector::<Farm>::new(b"x".to_vec());
+        let mut active_farms = Vec::<u64>::new();
+
+        let f1 = Farm{
+            name: "test 1".to_string(), 
+            token_id: test_utils::alice(), 
+            amount: 100, 
+            start_date: 1, 
+            end_date: 20,
+            last_distribution: RewardDistribution { 
+                undistributed: 10, 
+                _deprecated_unclaimed: 0, 
+                reward_per_share: U256::zero(), 
+                reward_per_share_for_accounts_not_staking_rewards: U256::zero(), 
+                reward_round: 1 
+            }};
+
+        farms.push(&f1);
+        active_farms.push(farms.len() - 1);
+
+        let f2 = Farm{
+            name: "test 2".to_string(), 
+            token_id: test_utils::bob(), 
+            amount: 200, 
+            start_date: 1, 
+            end_date: 50,
+            last_distribution: RewardDistribution { 
+                undistributed: 10, 
+                _deprecated_unclaimed: 0, 
+                reward_per_share: U256::zero(), 
+                reward_per_share_for_accounts_not_staking_rewards: U256::zero(), 
+                reward_round: 1 
+            }};
+
+        farms.push(&f2);
+        active_farms.push(farms.len() - 1);
+
+        let f3 = Farm{
+            name: "test 3".to_string(), 
+            token_id: test_utils::charlie(), 
+            amount: 300, 
+            start_date: 1, 
+            end_date: 1000,
+            last_distribution: RewardDistribution { 
+                undistributed: 10, 
+                _deprecated_unclaimed: 0, 
+                reward_per_share: U256::zero(), 
+                reward_per_share_for_accounts_not_staking_rewards: U256::zero(), 
+                reward_round: 1 
+            }};
+
+        farms.push(&f3);
+        active_farms.push(farms.len() - 1);
+
+        let f4 = Farm{
+            name: "test 4".to_string(), 
+            token_id: test_utils::owner(), 
+            amount: 400, 
+            start_date: 1, 
+            end_date: 50,
+            last_distribution: RewardDistribution { 
+                undistributed: 10, 
+                _deprecated_unclaimed: 0, 
+                reward_per_share: U256::zero(), 
+                reward_per_share_for_accounts_not_staking_rewards: U256::zero(), 
+                reward_round: 1 
+            }};
+
+        farms.push(&f4);
+        active_farms.push(farms.len() - 1);
+
+        assert_eq!(farms.get(0).unwrap().name, f1.name);
+        assert_eq!(farms.get(3).unwrap().name, f4.name);
+
+        print_farms(&active_farms, &farms);
+
+        // remove farm with id 1, this is farm f2
+        let farm_idx = active_farms.iter().position(|x| *x == 1).unwrap();
+        active_farms.remove(farm_idx);
+        
+        assert_eq!(active_farms.len(), 3);
+        assert_eq!(farms.len(), 4);
+
+        print_farms(&active_farms, &farms);
+
+        farms.push(&f2);
+        active_farms.push(farms.len() - 1);
+
+        assert_eq!(farms.get(4).unwrap().name, f2.name);
+
+        print_farms(&active_farms, &farms);
+
+        let farm_idx = active_farms.iter().position(|x| *x == 4).expect("ERR_NO_FARM");
+        active_farms.remove(farm_idx);
+
+        assert_eq!(active_farms.len(), 3);
+        assert_eq!(farms.len(), 5);
+
+        print_farms(&active_farms, &farms);
+    }
+    fn print_farms(active_farms: &Vec<u64>, farms: &Vector<Farm>){
+        let ff: Vec<HumanReadableFarm> = active_farms
+        .iter()
+        .map(|&index| HumanReadableFarm::from(index, farms.get(index).unwrap()))
+        .collect();
+
+        println!("------------------");
+        ff.iter().for_each(|el| println!("id: {} name: {}", el.farm_id, el.name));
     }
 }

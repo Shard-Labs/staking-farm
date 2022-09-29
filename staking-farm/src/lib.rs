@@ -879,7 +879,6 @@ mod tests {
 
         rpt.add(Fraction ::new (253413999866417394042330927, total_staked_balance));
 
-        
         let a = Fraction::new(204574360324123112677640207, 32190000000000000000000000000).multiply(158);
         assert_eq!(a, 1);
 
