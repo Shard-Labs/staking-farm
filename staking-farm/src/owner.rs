@@ -1,4 +1,4 @@
-use near_sdk::sys;
+use near_sdk::{sys, require};
 use near_sdk::sys::{promise_batch_action_function_call, promise_batch_then};
 
 use crate::*;
@@ -164,6 +164,8 @@ impl StakingContract {
             "{}",
             ERR_MUST_BE_OWNER
         );
+
+        self.assert_at_least_one_yocto();
     }
 
     /// Asserts that the method was called by pauser user
@@ -193,6 +195,12 @@ impl StakingContract {
                 || self.authorized_users.contains(&account_id),
             "ERR_NOT_AUTHORIZED_USER"
         );
+
+        self.assert_at_least_one_yocto();
+    }
+
+    pub(crate) fn assert_at_least_one_yocto(&self){
+        require!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR")
     }
 }
 
@@ -213,6 +221,8 @@ pub extern "C" fn upgrade() {
         "{}",
         ERR_MUST_BE_OWNER
     );
+    require!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR");
+
     unsafe {
         // Load hash to the register 0.
         sys::input(0);

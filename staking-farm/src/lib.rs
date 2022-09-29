@@ -672,7 +672,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         add_farm(&mut emulator, ntoy(100));
 
@@ -757,7 +757,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         add_farm(&mut emulator, ntoy(100));
         emulator.deposit_and_stake(alice(), ntoy(1_000_000));
@@ -767,7 +767,7 @@ mod tests {
             ntoy(25),
             ntoy(1) / 100
         ));
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.stop_farm(0);
         emulator.skip_epochs(1);
         // Deposit alice, start farm, wait for 1 epoch.
@@ -804,7 +804,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         add_farm(&mut emulator, 100);
     }
@@ -820,7 +820,7 @@ mod tests {
             Option::None,
         );
         assert_eq!(emulator.contract.get_reward_fee_fraction(), zero_fee());
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         let new_fee = Ratio {
             numerator: 1,
             denominator: 10,
@@ -846,7 +846,7 @@ mod tests {
             numerator: 2,
             denominator: 10,
         };
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator
             .contract
             .update_reward_fee_fraction(new_fee2.clone());
@@ -1191,7 +1191,7 @@ mod tests {
             zero_fee(),
             Some(ntoy(100) + 10u128.pow(12)),
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         let farm_amount = ntoy(100);
         add_farm(&mut emulator, farm_amount);
