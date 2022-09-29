@@ -15,6 +15,8 @@ construct_uint! {
 
 pub trait StakingPool{
     fn get_total_staked_balance(&self) -> Balance;
+    fn get_account_staked_balance(&self, account_id: &AccountId) -> Balance;
+    fn get_account_unstaked_balance(&self, account_id: &AccountId) -> Balance;
     fn get_account_info(&self, account_id: &AccountId) -> HumanReadableAccount;
     fn deposit(&mut self, account_id: &AccountId, amount: Balance);
     fn withdraw(&mut self, account_id: &AccountId, amount: Balance) -> bool;
@@ -270,6 +272,17 @@ impl StakingPool for InnerStakingPool{
         return self.total_staked_balance;
     }
 
+    fn get_account_staked_balance(&self, account_id: &AccountId) -> Balance {
+        return self
+            .staked_amount_from_num_shares_rounded_down(
+                self.internal_get_account(&account_id).stake_shares
+            );
+    }
+
+    fn get_account_unstaked_balance(&self, account_id: &AccountId) -> Balance {
+        return self.internal_get_account(&account_id).unstaked;
+    }
+
     fn does_pool_stake_staking_rewards(&self) -> bool {
         return true;
     }
@@ -466,6 +479,14 @@ impl StakingPool for InnerStakingPool{
 impl StakingPool for InnerStakingPoolWithoutRewardsRestaked{
     fn get_total_staked_balance(&self) -> Balance {
         return self.total_staked_balance;
+    }
+    
+    fn get_account_staked_balance(&self, account_id: &AccountId) -> Balance {
+        return self.internal_get_account(&account_id).stake_shares;
+    }
+
+    fn get_account_unstaked_balance(&self, account_id: &AccountId) -> Balance {
+        return self.internal_get_account(&account_id).unstaked;
     }
 
     fn does_pool_stake_staking_rewards(&self) -> bool {

@@ -96,7 +96,7 @@ impl StakingContract {
         };
 
         let account_id = env::predecessor_account_id();
-        let account_unstaked = self.get_account_unstaked_balance(account_id.clone()).0;
+        let account_unstaked = self.internal_get_account_unstaked_balance(&account_id.clone());
         self.internal_withdraw(&env::predecessor_account_id(), &acc_receive_id, account_unstaked, true);
 
         if need_to_restake {
@@ -139,8 +139,8 @@ impl StakingContract {
         self.internal_ping();
 
         let account_id = env::predecessor_account_id();
-        let unstaked_balance = self.get_account_unstaked_balance(account_id.clone());
-        self.internal_stake(unstaked_balance.0);
+        let unstaked_balance = self.internal_get_account_unstaked_balance(&account_id);
+        self.internal_stake(unstaked_balance);
 
         self.internal_restake();
     }

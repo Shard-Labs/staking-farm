@@ -203,8 +203,7 @@ impl StakingContract {
 
     /// Returns the total staking balance.
     pub fn get_total_staked_balance(&self) -> U128 {
-        (self.rewards_staked_staking_pool.total_staked_balance 
-            + self.rewards_not_staked_staking_pool.total_staked_balance)
+        self.internal_get_total_staked_balance()
             .into()
     }
 
