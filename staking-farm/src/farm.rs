@@ -407,6 +407,17 @@ impl StakingContract {
         }
     }
 
+    /// functionality for removing already stopped farm
+    /// to be able to add new farm
+    pub fn remove_stoped_farm(&mut self, farm_id: u64){
+        self.assert_owner();
+        let farm = self.internal_get_farm(farm_id);
+        assert_eq!(farm.is_active(), false, "Farm should be inactive");
+
+        let farm_id_idx = self.active_farms.iter().position(|el| *el == farm_id).expect("ERR_NO_FARM");
+        self.active_farms.remove(farm_id_idx);
+    }
+
     /// Stops given farm at the current moment.
     /// Warning: IF OWNER ACCOUNT DOESN'T HAVE STORAGE, THESE FUNDS WILL BE STUCK ON THE STAKING FARM.
     pub fn stop_farm(&mut self, farm_id: u64) -> Promise {
