@@ -200,7 +200,7 @@ impl StakingContract {
     }
 
     pub(crate) fn assert_at_least_one_yocto(&self){
-        require!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR")
+        assert!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR")
     }
 }
 
@@ -221,7 +221,7 @@ pub extern "C" fn upgrade() {
         "{}",
         ERR_MUST_BE_OWNER
     );
-    require!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR");
+    assert!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR");
 
     unsafe {
         // Load hash to the register 0.
