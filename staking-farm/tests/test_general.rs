@@ -221,8 +221,13 @@ fn setup(
         pool.account_id(),
         "add_authorized_farm_token",
         json!({ "token_id": token_id() }),
-        0,
+        1,
     );
+
+    let mut pool_account = pool.account().unwrap();
+    pool_account.amount -= 1;
+    root.borrow_runtime_mut().force_account_update(pool.account_id(), &pool_account);
+    
     (root, pool)
 }
 
@@ -402,7 +407,7 @@ fn test_unstaking(){
         0
     );
     let mut current_account_balance = get_pool_balances(&pool);
-
+    
     assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
     assert_eq!(current_account_balance.locked_balance.0, to_yocto("160"));
 
@@ -1104,7 +1109,7 @@ fn test_farm_change_errors() {
         pool.account_id(),
         "add_authorized_farm_token",
         json!({ "token_id": new_token_id.clone() }),
-        0,
+        1,
     );
 
     // Panics when a different token is sent

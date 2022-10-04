@@ -20,6 +20,3 @@ quickcheck_macros = "0.9"
 log = "0.4"
 env_logger = { version = "0.7.1", default-features = false }
 near-sdk-sim = "4.0.0-pre.4"
-workspaces = "0.3.1"
-tokio = "^1"
-anyhow = "^1.0"

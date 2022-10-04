@@ -409,6 +409,7 @@ impl StakingContract {
 
     /// functionality for removing already stopped farm
     /// to be able to add new farm
+    #[payable]
     pub fn remove_stoped_farm(&mut self, farm_id: u64){
         self.assert_owner();
         let farm = self.internal_get_farm(farm_id);
@@ -420,6 +421,7 @@ impl StakingContract {
 
     /// Stops given farm at the current moment.
     /// Warning: IF OWNER ACCOUNT DOESN'T HAVE STORAGE, THESE FUNDS WILL BE STUCK ON THE STAKING FARM.
+    #[payable]
     pub fn stop_farm(&mut self, farm_id: u64) -> Promise {
         self.assert_owner();
         let mut farm = self.internal_get_farm(farm_id);

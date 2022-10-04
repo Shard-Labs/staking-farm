@@ -58,6 +58,7 @@ impl StakingContract {
 
     /// Owner's method.
     /// Updates current public key to the new given public key.
+    #[payable]
     pub fn update_staking_key(&mut self, stake_public_key: PublicKey) {
         self.assert_owner();
         // When updating the staking key, the contract has to restake.
@@ -68,6 +69,7 @@ impl StakingContract {
 
     /// Owner's method.
     /// Updates current reward fee fraction to the new given fraction.
+    #[payable]
     pub fn update_reward_fee_fraction(&mut self, reward_fee_fraction: Ratio) {
         self.assert_owner();
         reward_fee_fraction.assert_valid();
@@ -100,6 +102,7 @@ impl StakingContract {
 
     /// Pauser's method.
     /// Pauses pool staking.
+    #[payable]
     pub fn pause_staking(&mut self) {
         self.assert_pauser();
         assert!(!self.paused, "The staking is already paused");
@@ -111,6 +114,7 @@ impl StakingContract {
 
     /// Pauser's method.
     /// Resumes pool staking.
+    #[payable]
     pub fn resume_staking(&mut self) {
         self.assert_pauser();
         assert!(self.paused, "The staking is not paused");
@@ -133,24 +137,28 @@ impl StakingContract {
     }
 
     /// Add authorized user to the current contract.
+    #[payable]
     pub fn add_authorized_user(&mut self, account_id: AccountId) {
         self.assert_owner();
         self.authorized_users.insert(&account_id);
     }
 
     /// Remove authorized user from the current contract.
+    #[payable]
     pub fn remove_authorized_user(&mut self, account_id: AccountId) {
         self.assert_owner();
         self.authorized_users.remove(&account_id);
     }
 
     /// Add authorized token.
+    #[payable]
     pub fn add_authorized_farm_token(&mut self, token_id: &AccountId) {
         self.assert_owner_or_authorized_user();
         self.authorized_farm_tokens.insert(&token_id);
     }
 
     /// Remove authorized token.
+    #[payable]
     pub fn remove_authorized_farm_token(&mut self, token_id: &AccountId) {
         self.assert_owner_or_authorized_user();
         self.authorized_farm_tokens.remove(&token_id);
