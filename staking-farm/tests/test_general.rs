@@ -346,6 +346,7 @@ fn test_unstake_rewards(){
     print_current_epoch(&root);
     let pool_reward = to_yocto("10");
     get_pool_balances(&pool);
+    // set reward to pool for 10 NEAR
     reward_pool(&root, pool.account_id(), pool_reward);
     assert_all_success(call!(root, pool.ping()));
 
@@ -369,6 +370,7 @@ fn test_unstake_rewards(){
 
     wait_epoch_and_give_rewards(&root, 0);
     wait_epoch_and_give_rewards(&root, 0);
+    // 
     transfer_from_locked_to_unlocked_balance(&root, pool.account_id(), to_yocto("5"));
 
     assert_all_success(call!(root, pool.ping()));
@@ -379,8 +381,6 @@ fn test_unstake_rewards(){
         view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
         to_yocto("10") / 2
     );
-
-
 }
 
 #[test]
@@ -1171,6 +1171,7 @@ fn test_burn_fee() {
     let pool_summary = get_pool_summary(&root);
     assert_eq!(pool_summary.burn_fee_fraction.numerator, 3);
 
+    // decrease burn fee
     call(
         &root,
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
@@ -1186,6 +1187,7 @@ fn test_burn_fee() {
     assert_eq!(pool_summary.burn_fee_fraction.numerator, 1);
     assert_eq!(pool_summary.burn_fee_fraction.denominator, 4);
 
+    // decrease burn fee again
     call(
         &root,
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
