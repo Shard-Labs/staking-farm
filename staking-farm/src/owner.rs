@@ -184,6 +184,8 @@ impl StakingContract {
             "{}",
             ERR_MUST_BE_PAUSER
         );
+
+        assert_one_yocto();
     }
 
     /// Asserts that the method was called by the factory.
