@@ -5,7 +5,7 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, BorshStorageKey, EpochHeight, Gas,
-    Promise, PromiseResult, PublicKey,
+    Promise, PromiseResult, PublicKey, PanicOnDefault,
 };
 use uint::construct_uint;
 
@@ -115,7 +115,7 @@ impl UpdatableRewardFee {
 }
 
 #[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct StakingContract {
     /// The public key which is used for staking action. It's the public key of the validator node
     /// that validates on behalf of the pool.
