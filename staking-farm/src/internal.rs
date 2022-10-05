@@ -78,6 +78,10 @@ impl StakingContract {
     }
 
     pub(crate) fn inner_unstake(&mut self, account_id: &AccountId, amount: u128) {
+        if self.paused{
+            return;
+        }
+        
         assert!(amount > 0, "Unstaking amount should be positive");
         let account_staking_rewards = self.does_account_stake_his_rewards(&account_id);
         

@@ -5,7 +5,7 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, BorshStorageKey, EpochHeight, Gas,
-    Promise, PromiseResult, PublicKey,
+    Promise, PromiseResult, PublicKey, PanicOnDefault,
 };
 use uint::construct_uint;
 
@@ -63,6 +63,7 @@ pub enum StorageKeys {
     AccountsNotStakedStakingPool,
     OptimisticTimeExpectTokens,
     ExpectedTokensInEpoch,
+    PauserUsers,
 }
 
 /// Tracking balance for burning.
@@ -115,7 +116,7 @@ impl UpdatableRewardFee {
 }
 
 #[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct StakingContract {
     /// The public key which is used for staking action. It's the public key of the validator node
     /// that validates on behalf of the pool.
@@ -140,6 +141,8 @@ pub struct StakingContract {
     /// Pausing is useful for node maintenance. Only the owner can pause and resume staking.
     /// The contract is not paused by default.
     pub paused: bool,
+    /// Authorized users to pause the contract.
+    pub pauser_users: UnorderedSet<AccountId>,
     /// Authorized users, allowed to add farms.
     /// This is done to prevent farm spam with random tokens.
     /// Should not be a large number.
@@ -153,12 +156,6 @@ pub struct StakingContract {
     pub rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked,
     /// Map showing whether account has his rewards staked or unstaked
     pub account_pool_register: UnorderedMap<AccountId, bool>,
-}
-
-impl Default for StakingContract {
-    fn default() -> Self {
-        panic!("Staking contract should be initialized before usage")
-    }
 }
 
 /// Old struct https://github.com/referencedev/staking-farm
@@ -221,6 +218,7 @@ impl StakingContract {
             farms: old_state.farms,
             active_farms: old_state.active_farms,
             paused: old_state.paused,
+            pauser_users: UnorderedSet::new(StorageKeys::PauserUsers),
             authorized_users: old_state.authorized_users,
             authorized_farm_tokens: old_state.authorized_farm_tokens,
             rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(old_state.total_staked_balance), old_state.total_staked_balance, old_state.total_burn_shares),
@@ -230,6 +228,9 @@ impl StakingContract {
 
         this.rewards_staked_staking_pool.accounts = old_state.accounts;
         let owner_id = Self::internal_get_owner_id();
+
+        // Initially the owner is the only user authorized to pause the contract.
+        this.pauser_users.insert(&owner_id);
 
         this.internal_register_account_to_staking_pool(&owner_id, true);
         this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
@@ -250,8 +251,8 @@ impl StakingContract {
         reward_fee_fraction: Ratio,
         burn_fee_fraction: Ratio,
     ) -> Self {
-        assert!(!env::state_exists(), "Already initialized");
         reward_fee_fraction.assert_valid();
+        burn_fee_fraction.assert_valid();
         assert!(
             env::is_valid_account_id(owner_id.as_bytes()),
             "The owner account ID is invalid"
@@ -272,12 +273,17 @@ impl StakingContract {
             farms: Vector::new(StorageKeys::Farms),
             active_farms: Vec::new(),
             paused: false,
+            pauser_users: UnorderedSet::new(StorageKeys::PauserUsers),
             authorized_users: UnorderedSet::new(StorageKeys::AuthorizedUsers),
             authorized_farm_tokens: UnorderedSet::new(StorageKeys::AuthorizedFarmTokens),
             rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(total_staked_balance), total_staked_balance, 0),
             rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
             account_pool_register: UnorderedMap::new(StorageKeys::AccountRegistry),
         };
+
+        // Initially the owner is the only user authorized to pause the contract.
+        this.pauser_users.insert(&owner_id);
+
         Self::internal_set_owner(&owner_id);
         Self::internal_set_factory(&env::predecessor_account_id());
         Self::internal_set_version();

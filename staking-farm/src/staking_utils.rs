@@ -113,7 +113,7 @@ pub struct Ratio {
 
 impl Ratio {
     pub fn assert_valid(&self) {
-        assert_ne!(self.denominator, 0, "Denominator must be a positive number");
+        assert!(self.denominator != 0 || self.numerator == self.denominator, "Denominator can be 0, only if numerator is 0");
         assert!(
             self.numerator <= self.denominator,
             "The reward fee must be less or equal to 1"
@@ -121,6 +121,7 @@ impl Ratio {
     }
 
     pub fn multiply(&self, value: Balance) -> Balance {
+        self.assert_valid();
         if self.denominator == 0 || self.numerator == 0 {
             0
         } else {
