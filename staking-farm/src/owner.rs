@@ -318,15 +318,18 @@ pub extern "C" fn migrate() {
         ERR_MUST_BE_SELF
     );
 
-    // Check that state version is previous.
-    // Will fail migration in the case of trying to skip the versions.
-    assert_eq!(
-        StakingContract::internal_get_state_version(),
-        "staking-farm:1.1.0"
-    );
+    let state_version = StakingContract::internal_get_state_version();
 
-    // migrate the state
-    StakingContract::migrate_state();
+    match state_version.as_str() {
+        "staking-farm:1.1.0" => {
+            // migrate the state
+            StakingContract::migrate_state();
 
-    StakingContract::internal_set_version();
+            StakingContract::internal_set_version();
+        },
+        "staking-farm:2.0.0" => {
+            // Do nothing
+        },
+        _ => panic!("Version not recognized")
+    };
 }
