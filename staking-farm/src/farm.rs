@@ -410,7 +410,7 @@ impl StakingContract {
     /// functionality for removing already stopped farm
     /// to be able to add new farm
     #[payable]
-    pub fn remove_stoped_farm(&mut self, farm_id: u64){
+    pub fn remove_stopped_farm(&mut self, farm_id: u64){
         self.assert_owner();
         let farm = self.internal_get_farm(farm_id);
         assert_eq!(farm.is_active(), false, "Farm should be inactive");
