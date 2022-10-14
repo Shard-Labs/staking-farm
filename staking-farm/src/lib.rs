@@ -49,7 +49,8 @@ const NUM_EPOCHS_TO_UNLOCK: EpochHeight = 4;
 
 construct_uint! {
     /// 256-bit unsigned integer.
-    #[derive(BorshSerialize, BorshDeserialize)]
+    #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+    #[serde(crate = "near_sdk::serde")]
     pub struct U256(4);
 }
 
@@ -353,6 +354,7 @@ mod tests {
         }
     }
 
+    /// Test deposit without staking and then withdrawing the amount
     #[test]
     fn test_deposit_withdraw() {
         let mut emulator = Emulator::new(
@@ -379,6 +381,7 @@ mod tests {
         );
     }
 
+    /// Test that covers the fee and what part of the rewards for the epochs passed goes to the owner
     #[test]
     fn test_stake_with_fee() {
         let mut emulator = Emulator::new(
@@ -448,6 +451,7 @@ mod tests {
         assert_eq!(emulator.contract.get_number_of_accounts(), 2);
     }
 
+    /// Test staking and unstaking and check If the unstaked balance is available after 4 epochs
     #[test]
     fn test_stake_unstake() {
         let mut emulator = Emulator::new(
@@ -671,7 +675,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         add_farm(&mut emulator, ntoy(100));
 
@@ -756,8 +760,9 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
+        // farm that will distribute 100 tokens
         add_farm(&mut emulator, ntoy(100));
         emulator.deposit_and_stake(alice(), ntoy(1_000_000));
         emulator.skip_epochs(1);
@@ -766,7 +771,7 @@ mod tests {
             ntoy(25),
             ntoy(1) / 100
         ));
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.stop_farm(0);
         emulator.skip_epochs(1);
         // Deposit alice, start farm, wait for 1 epoch.
@@ -789,6 +794,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
+        // token was not added as authorized, should fail
         add_farm(&mut emulator, ntoy(100));
     }
 
@@ -803,7 +809,7 @@ mod tests {
             zero_fee(),
             Option::None,
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         add_farm(&mut emulator, 100);
     }
@@ -819,7 +825,7 @@ mod tests {
             Option::None,
         );
         assert_eq!(emulator.contract.get_reward_fee_fraction(), zero_fee());
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         let new_fee = Ratio {
             numerator: 1,
             denominator: 10,
@@ -845,13 +851,14 @@ mod tests {
             numerator: 2,
             denominator: 10,
         };
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator
             .contract
             .update_reward_fee_fraction(new_fee2.clone());
         assert_eq!(emulator.contract.get_reward_fee_fraction(), new_fee);
     }
 
+    /// Test fractions behaviour
     #[test]
     fn test_fraction(){
         let f = Fraction::new(17, 32);
@@ -878,7 +885,7 @@ mod tests {
 
         rpt.add(Fraction ::new (253413999866417394042330927, total_staked_balance));
 
-        
+        // test fraction reducing of numerator and denominator
         let a = Fraction::new(204574360324123112677640207, 32190000000000000000000000000).multiply(158);
         assert_eq!(a, 1);
 
@@ -975,7 +982,9 @@ mod tests {
         emulator.contract.ping();
         emulator.update_context(bob(), 0);
         println!("{}", yton(rewards*5/10));
+        // skip epochs but dont set rewards
         emulator.skip_epochs_and_set_reward(4, 0);
+        // unlock 5 NEAR rewards
         emulator.transfer_from_locked_amount_to_contract_balance(ntoy(5));
         emulator.contract.ping();
 
@@ -1078,6 +1087,7 @@ mod tests {
         emulator.contract.stake_all();
         emulator.simulate_stake_call();
 
+        // set rewards and check their distribution
         rewards = ntoy(44);
         emulator.skip_epochs_and_set_reward(1, rewards);
         emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
@@ -1090,6 +1100,7 @@ mod tests {
 
         println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
 
+        // set rewards and check their distribution
         rewards = ntoy(116);
         emulator.skip_epochs_and_set_reward(1, rewards);
         emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
@@ -1098,6 +1109,7 @@ mod tests {
 
         println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
 
+        // set rewards and check their distribution
         rewards = ntoy(53);
         emulator.skip_epochs_and_set_reward(1, rewards);
         emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
@@ -1128,6 +1140,7 @@ mod tests {
         
         rewards = ntoy(20);
         for _i in 0..4{
+            // set rewards and check their distribution
             assert_eq!(emulator.contract.get_account(b()).can_withdraw, false);
             emulator.skip_epochs_and_set_reward(1, rewards);
             emulator.distribute_rewards_between_pools(&mut future_rewards, rewards, 3);
@@ -1137,6 +1150,7 @@ mod tests {
             println!("D rewards {}", emulator.contract.get_account_not_staked_rewards(d()).0);
         }
         
+        // unlock rewards
         emulator.transfer_from_locked_amount_to_contract_balance(b_staked);
         assert_eq!(emulator.contract.get_account(b()).can_withdraw, true);
         assert_eq_in_near!(emulator.contract.get_account_unstaked_balance(b()).0, b_deposit_amount + ntoy(41));
@@ -1191,7 +1205,7 @@ mod tests {
             zero_fee(),
             Some(ntoy(100) + 10u128.pow(12)),
         );
-        emulator.update_context(owner(), 0);
+        emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
         let farm_amount = ntoy(100);
         add_farm(&mut emulator, farm_amount);
@@ -1269,71 +1283,8 @@ mod tests {
         assert!(almost_equal(emulator.contract.get_unclaimed_reward(charlie(), 0).0, charlie_farmed + (farm_amount / 4 * 4 / 7) + farm_amount/4 / 11 * 8, ntoy(1) / 100));
     }
 
-    // #[test]
-    // fn test_migration(){
-    //     let mut old_state = OldVersionStakingContract::new(
-    //         "mario".parse().unwrap(), 
-    //         "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
-    //         ntoy(100));
-
-    //     let mut acc = old_state.rewards_staked_staking_pool.internal_get_account(&alice());
-    //     acc.unstaked = 100;
-    //     acc.stake_shares = 50;
-    //     old_state.rewards_staked_staking_pool.internal_save_account(&alice(), &acc);
-    //     let mut acc_rew =  OldStateAccountWithReward { unstaked: 20, stake: 50, unstaked_available_epoch_height: 0, reward_tally: 0, tally_below_zero: false, last_farm_reward_per_share: HashMap::new(), amounts:HashMap::new() };
-    //     acc_rew.amounts.insert(c(), 1000);
-    //     acc_rew.amounts.insert(d(), 20000);
-    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&bob(), &acc_rew);
-    //     acc_rew.unstaked += 10;
-    //     old_state.rewards_not_staked_staking_pool.accounts.insert(&a(), &acc_rew);
-
-    //     let mut this = StakingContract{
-    //         stake_public_key: old_state.stake_public_key,
-    //         last_epoch_height: old_state.last_epoch_height,
-    //         last_balance_in_contract: env::account_balance(),
-    //         optimistic_expected_tokens: UnorderedMap::new(StorageKeys::OptimisticTimeExpectTokens),
-    //         last_total_balance: old_state.last_total_balance,
-    //         reward_fee_fraction: old_state.reward_fee_fraction,
-    //         burn_fee_fraction: old_state.burn_fee_fraction,
-    //         farms: old_state.farms,
-    //         active_farms: old_state.active_farms,
-    //         paused: old_state.paused,
-    //         authorized_users: old_state.authorized_users,
-    //         authorized_farm_tokens: old_state.authorized_farm_tokens,
-    //         rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
-    //         rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
-    //         account_pool_register: old_state.account_pool_register,
-    //     };
-    //     log!("2");
-    //     this.rewards_not_staked_staking_pool.reward_per_token = Fraction::new(old_state.rewards_not_staked_staking_pool.reward_per_token.numerator, old_state.rewards_not_staked_staking_pool.reward_per_token.denominator);
-    //     this.rewards_not_staked_staking_pool.total_buffered_rewards = 0;
-    //     this.rewards_not_staked_staking_pool.total_staked_balance = old_state.rewards_not_staked_staking_pool.total_staked_balance;
-    //     this.rewards_not_staked_staking_pool.total_rewards = this.rewards_not_staked_staking_pool.reward_per_token.multiply(this.rewards_not_staked_staking_pool.total_staked_balance);
-        
-    //     let old_state_acc_vec_iter = old_state.rewards_not_staked_staking_pool.accounts.iter();
-    //     log!("3");
-    //     for element in old_state_acc_vec_iter{
-    //         log!("{}", element.0);
-    //         let acc: AccountWithReward = AccountWithReward { 
-    //             unstaked: element.1.unstaked, 
-    //             stake: element.1.stake, 
-    //             unstaked_available_epoch_height: element.1.unstaked_available_epoch_height, 
-    //             reward_tally: element.1.reward_tally, 
-    //             tally_below_zero: element.1.tally_below_zero, 
-    //             payed_reward: 0, 
-    //             last_farm_reward_per_share: element.1.last_farm_reward_per_share.clone(), 
-    //             amounts: element.1.amounts.clone() 
-    //         };
-
-    //         //log!("4 {} {}", element.0, acc.);
-    //         this.rewards_not_staked_staking_pool.accounts.insert(&element.0, &acc);
-    //     }
-
-    //     log!("5");
-    // }
     #[test]
-    fn test_rewards_after_not_calling_ping()
-    {
+    fn test_rewards_after_not_calling_ping(){
         let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
@@ -1366,6 +1317,7 @@ mod tests {
         emulator.contract.ping();
         println!("Rewards {} {}", emulator.contract.get_account_possible_rewards(a()).0, emulator.contract.get_account_possible_rewards(b()).0);
 
+        // Account A should have no rewards for withdraw
         assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, 0);
         emulator.update_context(b(), 0);
         emulator.contract.unstake_all();
@@ -1382,10 +1334,9 @@ mod tests {
         emulator.transfer_from_locked_amount_to_contract_balance(ntoy(50));
         emulator.contract.ping();
         assert_eq!(emulator.contract.get_account_not_staked_rewards(a()).0, ntoy(155));
-
-
     }
 
+    // Test rewards locking unlocking with real number from testnet
     #[test]
     fn check_rewards_distribution(){
         let total_buffered_rewards:u128 =  184923025115118760000000000;

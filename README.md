@@ -158,7 +158,8 @@ The reward are computed the following way. The contract keeps track of the last 
 This balance consist of the initial contract balance, and all delegator account balances (including the owner) and all accumulated rewards.
 (Validation rewards are added automatically at the beginning of the epoch, while contract execution gas rebates are added after each transaction)
 
-First the contract should take note of the smart contract (unlocked) balance. It is the account balance (env::account_balance) without any deposit (env::attached_deposit). Then a method is called to check what amount of the difference between the current unlocked balance and the last balance in the contract, is actual unlocked rewards and what amount is for unstaked tokens. This is achieved by iterating over a collection that keeps track of expected amounts - rewards or unstated amount for each epoch. For every epoch it is checked if those amounts are able to be added to the last balance in contract and if this value is not greater than the current unlocked balance. If so distribute the rewards, by incrementing the buffered rewards variable of the pool that doesn’t restake its rewards.
+First the contract should take note of the smart contract (unlocked) balance. It is the account balance (env::account_balance) without any deposit (env::attached_deposit). Then the contract finds what amount should be added to the contract buffered rewards. This is done by iterating over all of the records in expected_rewards_in_epoch up until the current epoch including the current epoch, then adding it to an
+accumulator variable. 
 
 Then the contract uses the current total account balance (locked + unlocked balance - deposit) and then subtracts the last total account balance.
 The difference is the total reward that has to be distributed.
@@ -170,7 +171,7 @@ It could also be the case that they could change the reward fee to make their po
 
 The remaining part of the reward is distributed between the two inner pools. The calculation is made by combining the total staked balance of each pool and then distributed using the formula (total staked balance pool A) / (total staked balance pool A + total staked balance pool B). After figuring out what rewards goes to each pool, relative to the pool that staked its reward, the reward is added to the total staked balance of the inner pool, in the case of the other inner pool, that doesnt restake its rewards, the amount of reward is distributed between the accounts in this pool. Using the "Scalable Reward Distribution with Changing Stake Sizes" algorithm (https://solmaz.io/2019/02/24/scalable-reward-changing). For the pool that restakes rewards this action increases the price of each "stake" share without
 changing the amount of "stake" shares owned by different accounts. Which is effectively distributing the reward based on the number of shares.
-For the pool that doesnt restake rewards, the total staked balance remains the same, but the rewards for each account are increased.
+For the pool that doesnt restake rewards, the total staked balance remains the same, but the possible rewards for each account are increased. The rewards for the pool that doesnt restake rewards, because of the nature of NEAR blockchain, are being added to a struct expected_rewards_in_epoch. Those rewards will be part of the contract unlocked balance after 3 or 4 epochs, but to be sure 100% that the contract has enough balance, they are being accumulated after 4 epochs.
 
 The owner's reward is converted into "stake" shares at the new price and added to the owner's account.
 It's done similarly to `stake` method but without debiting the unstaked balance of owner's account.

@@ -231,7 +231,7 @@ fn test_staking_pool_upgrade_from_2_0_0() {
         "upgrade",
         &serde_json::to_vec(&json!({ "code_hash": code_hash })).unwrap(),
         near_sdk_sim::DEFAULT_GAS,
-        0,
+        1,
     ));
     // Check that contract works.
     assert_eq!(get_staking_pool_key(&root), STAKING_KEY.parse().unwrap());

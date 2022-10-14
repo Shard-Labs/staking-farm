@@ -23,7 +23,7 @@ impl StakingContract {
         // Stakes with the staking public key. If the public key is invalid the entire function
         // call will be rolled back.
         Promise::new(env::current_account_id())
-            .stake(self.get_total_staked_balance().0, self.stake_public_key.clone())
+            .stake(self.internal_get_total_staked_balance(), self.stake_public_key.clone())
             .then(ext_self::on_stake_action(
                 env::current_account_id(),
                 NO_DEPOSIT,
@@ -100,8 +100,8 @@ impl StakingContract {
         // Unstake action always restakes
         self.internal_ping();
 
-        let staked_balance = self.get_account_staked_balance(account_id.clone());
-        self.inner_unstake(account_id, staked_balance.0);
+        let staked_balance = self.internal_get_account_staked_balance(&account_id);
+        self.inner_unstake(account_id, staked_balance);
 
         self.internal_restake();
     }
@@ -307,5 +307,22 @@ impl StakingContract {
             String::from_utf8(env::storage_read(FACTORY_KEY).expect("MUST HAVE FACTORY"))
                 .expect("INTERNAL_FAIL"),
         )
+    }
+
+    pub(crate) fn internal_get_total_staked_balance(&self) -> Balance{
+        return self.rewards_staked_staking_pool.get_total_staked_balance() 
+            + self.rewards_not_staked_staking_pool.get_total_staked_balance();
+    }
+
+    pub(crate) fn internal_get_account_staked_balance(&self, account_id: &AccountId) -> Balance{
+        return self
+            .get_staking_pool_or_default(&account_id)
+            .get_account_staked_balance(&account_id);
+    }
+
+    pub(crate) fn internal_get_account_unstaked_balance(&self, account_id: &AccountId) -> Balance{
+        return self
+            .get_staking_pool_or_default(&account_id)
+            .get_account_unstaked_balance(&account_id);
     }
 }

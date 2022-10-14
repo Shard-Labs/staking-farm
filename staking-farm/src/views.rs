@@ -19,7 +19,7 @@ pub struct HumanReadableFarm {
 }
 
 impl HumanReadableFarm {
-    fn from(farm_id: u64, farm: Farm) -> Self {
+    pub (crate) fn from(farm_id: u64, farm: Farm) -> Self {
         let active = farm.is_active();
         HumanReadableFarm {
             farm_id,
@@ -203,8 +203,7 @@ impl StakingContract {
 
     /// Returns the total staking balance.
     pub fn get_total_staked_balance(&self) -> U128 {
-        (self.rewards_staked_staking_pool.total_staked_balance 
-            + self.rewards_not_staked_staking_pool.total_staked_balance)
+        self.internal_get_total_staked_balance()
             .into()
     }
 

@@ -221,8 +221,13 @@ fn setup(
         pool.account_id(),
         "add_authorized_farm_token",
         json!({ "token_id": token_id() }),
-        0,
+        1,
     );
+
+    let mut pool_account = pool.account().unwrap();
+    pool_account.amount -= 1;
+    root.borrow_runtime_mut().force_account_update(pool.account_id(), &pool_account);
+    
     (root, pool)
 }
 
@@ -341,6 +346,7 @@ fn test_unstake_rewards(){
     print_current_epoch(&root);
     let pool_reward = to_yocto("10");
     get_pool_balances(&pool);
+    // set reward to pool for 10 NEAR
     reward_pool(&root, pool.account_id(), pool_reward);
     assert_all_success(call!(root, pool.ping()));
 
@@ -364,6 +370,7 @@ fn test_unstake_rewards(){
 
     wait_epoch_and_give_rewards(&root, 0);
     wait_epoch_and_give_rewards(&root, 0);
+    // 
     transfer_from_locked_to_unlocked_balance(&root, pool.account_id(), to_yocto("5"));
 
     assert_all_success(call!(root, pool.ping()));
@@ -374,8 +381,6 @@ fn test_unstake_rewards(){
         view!(pool.get_account(user2.account_id())).unwrap_json::<HumanReadableAccount>().rewards_for_withdraw.0, 
         to_yocto("10") / 2
     );
-
-
 }
 
 #[test]
@@ -402,7 +407,7 @@ fn test_unstaking(){
         0
     );
     let mut current_account_balance = get_pool_balances(&pool);
-
+    
     assert_eq!(current_account_balance.contract_balance.0, STAKE_SHARE_PRICE_GUARANTEE_FUND);
     assert_eq!(current_account_balance.locked_balance.0, to_yocto("160"));
 
@@ -1104,7 +1109,7 @@ fn test_farm_change_errors() {
         pool.account_id(),
         "add_authorized_farm_token",
         json!({ "token_id": new_token_id.clone() }),
-        0,
+        1,
     );
 
     // Panics when a different token is sent
@@ -1166,6 +1171,7 @@ fn test_burn_fee() {
     let pool_summary = get_pool_summary(&root);
     assert_eq!(pool_summary.burn_fee_fraction.numerator, 3);
 
+    // decrease burn fee
     call(
         &root,
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
@@ -1181,6 +1187,7 @@ fn test_burn_fee() {
     assert_eq!(pool_summary.burn_fee_fraction.numerator, 1);
     assert_eq!(pool_summary.burn_fee_fraction.denominator, 4);
 
+    // decrease burn fee again
     call(
         &root,
         AccountId::new_unchecked(STAKING_POOL_ACCOUNT_ID.to_string()),
