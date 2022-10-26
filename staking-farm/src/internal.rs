@@ -111,6 +111,7 @@ impl StakingContract {
         if num_shares > 0 {
             let mut account = self.rewards_staked_staking_pool.internal_get_account(&account_id);
             account.stake_shares += num_shares;
+            self.internal_register_account_to_staking_pool(account_id, true);
             self.rewards_staked_staking_pool.internal_save_account(&account_id, &account);
             // Increasing the total amount of "stake" shares.
             self.rewards_staked_staking_pool.total_stake_shares += num_shares;

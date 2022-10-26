@@ -255,7 +255,6 @@ impl StakingContract {
     pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount>{
         let result = self.account_pool_register
                             .iter()
-                            .filter(|(acc_id, _)| *acc_id != self.get_owner_id() && *acc_id != AccountId::new_unchecked(ZERO_ADDRESS.to_string() ))
                             .skip(from_index.try_into().unwrap())
                             .take(limit.try_into().unwrap())
                             .map(|(acc_id, is_staking)|{

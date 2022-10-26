@@ -288,8 +288,6 @@ impl StakingContract {
         Self::internal_set_owner(&owner_id);
         Self::internal_set_factory(&env::predecessor_account_id());
         Self::internal_set_version();
-        this.internal_register_account_to_staking_pool(&owner_id, true);
-        this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
         // Staking with the current pool to make sure the staking key is valid.
         this.internal_restake();
         this
