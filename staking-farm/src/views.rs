@@ -193,7 +193,7 @@ impl StakingContract {
     /// Returns the total balance of the given account (including staked and unstaked balances).
     pub fn get_account_total_balance(&self, account_id: AccountId) -> U128 {
         let account = self.get_account(account_id);
-        (account.unstaked_balance.0 + account.staked_balance.0).into()
+        (account.unstaked_balance.0 + account.staked_balance.0 + account.possible_rewards.0).into()
     }
 
     /// Returns `true` if the given account can withdraw tokens in the current epoch.
