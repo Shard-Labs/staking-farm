@@ -205,6 +205,48 @@ pub struct OldStakingContract {
     pub authorized_farm_tokens: UnorderedSet<AccountId>,
 }
 
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct PreviousVersionStakingContract {
+    /// The public key which is used for staking action. It's the public key of the validator node
+    /// that validates on behalf of the pool.
+    pub stake_public_key: PublicKey,
+    /// The last epoch height when `ping` was called.
+    pub last_epoch_height: EpochHeight,
+    /// The last total balance of the account (consists of staked and unstaked balances).
+    pub last_total_balance: Balance,
+    /// The total amount to burn that will be available.
+    /// The fraction of the reward that goes to the owner of the staking pool for running the
+    /// validator node.
+    pub reward_fee_fraction: UpdatableRewardFee,
+    /// The fraction of the reward that gets burnt.
+    pub burn_fee_fraction: Ratio,
+    /// Farm tokens.
+    pub farms: Vector<Farm>,
+    /// Active farms: indicies into `farms`.
+    pub active_farms: Vec<u64>,
+    /// Whether the staking is paused.
+    /// When paused, the account unstakes everything (stakes 0) and doesn't restake.
+    /// It doesn't affect the staking shares or reward distribution.
+    /// Pausing is useful for node maintenance. Only the owner can pause and resume staking.
+    /// The contract is not paused by default.
+    pub paused: bool,
+    /// Authorized users to pause the contract.
+    pub pauser_users: UnorderedSet<AccountId>,
+    /// Authorized users, allowed to add farms.
+    /// This is done to prevent farm spam with random tokens.
+    /// Should not be a large number.
+    pub authorized_users: UnorderedSet<AccountId>,
+    /// Authorized tokens for farms.
+    /// Required because any contract can call method with ft_transfer_call, so must verify that contract will accept it.
+    pub authorized_farm_tokens: UnorderedSet<AccountId>,
+    /// Inner staking pool, that restakes the received rewards
+    pub rewards_staked_staking_pool: InnerStakingPool,
+    /// Inner staking pool, that doesnt restake rewards
+    pub rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked,
+    /// Map showing whether account has his rewards staked or unstaked
+    pub account_pool_register: UnorderedMap<AccountId, bool>
+}
+
 #[near_bindgen]
 impl StakingContract {
     #[private]
@@ -242,6 +284,31 @@ impl StakingContract {
         return this;
     }
 
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate_from_previous_state() -> Self{
+        let old_state: PreviousVersionStakingContract = env::state_read().expect("failed");
+
+        let this = Self{
+            stake_public_key: old_state.stake_public_key,
+            last_epoch_height: old_state.last_epoch_height,
+            last_total_balance: old_state.last_total_balance,
+            reward_fee_fraction: old_state.reward_fee_fraction,
+            burn_fee_fraction: old_state.burn_fee_fraction,
+            farms: old_state.farms,
+            active_farms: old_state.active_farms,
+            paused: old_state.paused,
+            pauser_users: old_state.pauser_users,
+            authorized_users: old_state.authorized_users,
+            authorized_farm_tokens: old_state.authorized_farm_tokens,
+            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
+            rewards_not_staked_staking_pool: old_state.rewards_not_staked_staking_pool,
+            account_pool_register: old_state.account_pool_register,
+            owner_restakes_rewards: true,
+        };
+
+        return this;
+    }
     /// Initializes the contract with the given owner_id, initial staking public key (with ED25519
     /// curve) and initial reward fee fraction that owner charges for the validation work.
     ///
