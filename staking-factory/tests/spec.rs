@@ -224,6 +224,7 @@ fn test_staking_pool_upgrade_from_2_0_0() {
     call!(foundation, factory.allow_contract(hash_2_0_0)).assert_success();
 
     create_staking_pool(&root, &factory, hash_2_0_0).assert_success();
+    println!("aaaa");
 
     // Upgrade staking pool.
     assert_all_success(root.call(

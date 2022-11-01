@@ -84,6 +84,8 @@ pub struct StakingPoolArgs {
     reward_fee_fraction: Ratio,
     /// Burn fee fraction.
     burn_fee_fraction: Ratio,
+    /// Owner restakes rewards
+    does_owner_restakes_his_rewards: bool,
 }
 
 /// External interface for the callbacks to self.
@@ -198,6 +200,7 @@ impl StakingPoolFactory {
                 stake_public_key,
                 reward_fee_fraction,
                 burn_fee_fraction: BURN_FEE_FRACTION,
+                does_owner_restakes_his_rewards: true,
             },
         );
     }
