@@ -146,6 +146,7 @@ fn setup(
     pool_initial_balance: Balance,
     reward_ratio: u32,
     burn_ratio: u32,
+    does_owner_restakes_rewards: bool,
 ) -> (UserAccount, PoolContract) {
     let root = init_simulator(None);
     // Disable contract rewards.
@@ -200,7 +201,7 @@ fn setup(
         signer_account: root,
         // adding STAKE_SHARE_PRICE_GUARANTEE_FUND to remove this rounding issue from further calculations.
         deposit: pool_initial_balance,
-        init_method: new(root.account_id(), STAKING_KEY.parse().unwrap(), reward_ratio, burn_ratio)
+        init_method: new(root.account_id(), STAKING_KEY.parse().unwrap(), reward_ratio, burn_ratio, does_owner_restakes_rewards)
     );
     assert_all_success(root.call(
         token_id(),
@@ -326,7 +327,7 @@ fn get_pool_expected_reward(pool: &ContractAccount<StakingContractContract>, epo
 
 #[test]
 fn test_unstake_rewards(){
-    let (root, pool) = setup(to_yocto("50") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0);
+    let (root, pool) = setup(to_yocto("50") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0, true);
 
     let user1  = root.create_user(AccountId::new_unchecked("user1".to_string()), to_yocto("51"));
     let user2 = root.create_user(AccountId::new_unchecked("user2".to_string()), to_yocto("101"));
@@ -385,7 +386,7 @@ fn test_unstake_rewards(){
 
 #[test]
 fn test_unstaking(){
-    let (root, pool) = setup(to_yocto("100") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0);
+    let (root, pool) = setup(to_yocto("100") + STAKE_SHARE_PRICE_GUARANTEE_FUND, 0, 0, true);
 
     let user1  = root.create_user(AccountId::new_unchecked("user1".to_string()), to_yocto("100"));
     
@@ -458,7 +459,7 @@ fn test_unstaking(){
 /// Test clean calculations without rewards and burn.
 #[test]
 fn test_farm() {
-    let (root, pool) = setup(to_yocto("10000") + 1_000_000_000_000, 0, 0);
+    let (root, pool) = setup(to_yocto("10000") + 1_000_000_000_000, 0, 0, true);
     let user1 = create_user_and_stake(&root, &pool);
     wait_epoch(&root);
     assert_all_success(call!(root, pool.ping()));
@@ -507,7 +508,7 @@ fn test_farm() {
 /// Additionally checks that 30% of rewards are burnt (sent 0x0)
 #[test]
 fn test_farm_with_lockup() {
-    let (root, pool) = setup(to_yocto("5"), 1, 3);
+    let (root, pool) = setup(to_yocto("5"), 1, 3, true);
     get_pool_balances(&pool);
     let user1 = create_user_and_stake(&root, &pool);
 
@@ -700,7 +701,7 @@ fn test_farm_with_lockup() {
 
 #[test]
 fn test_all_rewards_no_burn() {
-    let (root, pool) = setup(to_yocto("5"), 10, 0);
+    let (root, pool) = setup(to_yocto("5"), 10, 0, true);
     assert_eq!(
         to_int(view!(pool.get_account_total_balance(root.account_id()))),
         to_yocto("0")
@@ -720,7 +721,7 @@ fn test_all_rewards_no_burn() {
 
 #[test]
 fn test_all_rewards_burn() {
-    let (root, pool) = setup(to_yocto("5"), 10, 1);
+    let (root, pool) = setup(to_yocto("5"), 10, 1, true);
     let user1 = create_user_and_stake(&root, &pool);
     wait_epoch(&root);
     assert_all_success(call!(root, pool.ping()));
@@ -737,7 +738,7 @@ fn test_all_rewards_burn() {
 /// The test is based on the `test_farm_with_lockup` so some asserts are omitted.
 #[test]
 fn test_farm_refresh() {
-    let (root, pool) = setup(to_yocto("5"), 1, 3);
+    let (root, pool) = setup(to_yocto("5"), 1, 3, true);
 
     let user1 = create_user_and_stake(&root, &pool);
 
@@ -944,7 +945,7 @@ fn test_farm_refresh() {
 /// The test is based on the `test_farm_with_lockup` so some asserts are omitted.
 #[test]
 fn test_farm_change_before_start() {
-    let (root, pool) = setup(to_yocto("5"), 1, 3);
+    let (root, pool) = setup(to_yocto("5"), 1, 3, true);
 
     let user1 = create_user_and_stake(&root, &pool);
 
@@ -1003,7 +1004,7 @@ fn test_farm_change_before_start() {
 /// The test is based on the `test_farm_with_lockup` so some asserts are omitted.
 #[test]
 fn test_farm_change_errors() {
-    let (root, pool) = setup(to_yocto("5"), 1, 3);
+    let (root, pool) = setup(to_yocto("5"), 1, 3, true);
 
     let _user1 = create_user_and_stake(&root, &pool);
 
@@ -1164,7 +1165,7 @@ fn test_farm_change_errors() {
 
 #[test]
 fn test_burn_fee() {
-    let (root, pool) = setup(to_yocto("5"), 1, 3);
+    let (root, pool) = setup(to_yocto("5"), 1, 3, true);
 
     let _user1 = create_user_and_stake(&root, &pool);
 

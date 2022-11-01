@@ -48,15 +48,22 @@ impl StakingContract {
     }
 
     /// Changes contract owner. Must be called by current owner.
-    pub fn set_owner_id(owner_id: &AccountId) {
+    pub fn set_owner_id(&mut self, owner_id: &AccountId) {
         let prev_owner = StakingContract::internal_set_owner(owner_id).expect("MUST HAVE OWNER");
+        
         assert_eq!(
             prev_owner,
             env::predecessor_account_id(),
             "MUST BE OWNER TO SET OWNER"
         );
-    }
 
+        let new_owner_restakes_rewards = self
+            .account_pool_register
+            .get(&owner_id)
+            .expect("MUST HAVE BEEN REGISTERED TO ONE OF THE POOLS");
+
+        self.owner_restakes_rewards = new_owner_restakes_rewards;
+    }
     /// Owner's method.
     /// Updates current public key to the new given public key.
     #[payable]

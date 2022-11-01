@@ -33,9 +33,14 @@ impl StakingContract {
 
     pub(crate) fn internal_deposit(&mut self, should_staking_pool_restake_rewards: bool) -> u128 {
         let account_id = env::predecessor_account_id();
-        let staking_pool = self.get_staking_pool_or_create(&account_id, should_staking_pool_restake_rewards);
-        let amount = env::attached_deposit();
+
+        let staking_pool = if account_id == self.get_owner_id() {
+            self.get_staking_pool_or_create(&account_id, self.owner_restakes_rewards)
+        } else {
+            self.get_staking_pool_or_create(&account_id, should_staking_pool_restake_rewards)
+        };
         
+        let amount = env::attached_deposit();
         staking_pool.deposit(&account_id, amount);
         self.last_total_balance += amount;
 
@@ -107,14 +112,20 @@ impl StakingContract {
     }
 
     /// Add given number of staked shares to the given account.
-    fn internal_add_shares(&mut self, account_id: &AccountId, num_shares: NumStakeShares) {
+    fn internal_add_shares(&mut self, account_id: &AccountId, num_shares: NumStakeShares, does_account_restake_rewards: bool) {
         if num_shares > 0 {
-            let mut account = self.rewards_staked_staking_pool.internal_get_account(&account_id);
-            account.stake_shares += num_shares;
-            self.internal_register_account_to_staking_pool(account_id, true);
-            self.rewards_staked_staking_pool.internal_save_account(&account_id, &account);
-            // Increasing the total amount of "stake" shares.
-            self.rewards_staked_staking_pool.total_stake_shares += num_shares;
+            if self.get_staking_pool_or_create(&account_id, does_account_restake_rewards).does_pool_stake_staking_rewards(){
+                let mut account = self.rewards_staked_staking_pool.internal_get_account(&account_id);
+                account.stake_shares += num_shares;
+                self.rewards_staked_staking_pool.internal_save_account(&account_id, &account);
+                // Increasing the total amount of "stake" shares.
+                self.rewards_staked_staking_pool.total_stake_shares += num_shares;
+            }else{
+                let mut account = self.rewards_not_staked_staking_pool.internal_get_account(&account_id);
+                account.stake_shares += num_shares;
+                account.add_to_tally(self.rewards_not_staked_staking_pool.reward_per_token.multiply(num_shares));
+                self.rewards_not_staked_staking_pool.internal_save_account(&account_id, &account);
+            }
         }
     }
 
@@ -175,17 +186,31 @@ impl StakingContract {
             self.rewards_staked_staking_pool.total_burn_shares += num_burn_shares;
 
             // Now buying "stake" shares for the contract owner at the new share price.
-            let num_owner_shares = self.rewards_staked_staking_pool.num_shares_from_staked_amount_rounded_down(owners_fee);
+            let num_owner_shares = if self.owner_restakes_rewards {
+                self.rewards_staked_staking_pool.num_shares_from_staked_amount_rounded_down(owners_fee)
+            } else {
+                owners_fee
+            };
 
             self.internal_add_shares(
                 &AccountId::new_unchecked(ZERO_ADDRESS.to_string()),
                 num_burn_shares,
+                true
             );
-            self.internal_add_shares(&StakingContract::internal_get_owner_id(), num_owner_shares);
+            self.internal_add_shares(
+                &StakingContract::internal_get_owner_id(), 
+                num_owner_shares, 
+                self.owner_restakes_rewards);
 
             // Increasing the total staked balance by the owners fee, no matter whether the owner
             // received any shares or not.
-            self.rewards_staked_staking_pool.total_staked_balance += owners_fee + burn_fee;
+            self.rewards_staked_staking_pool.total_staked_balance += burn_fee;
+            if self.owner_restakes_rewards{
+                self.rewards_staked_staking_pool.total_staked_balance += owners_fee;
+            } else {
+                self.rewards_not_staked_staking_pool.total_staked_balance += owners_fee;
+            }
+
 
             log!(
                 "Epoch {}: Contract received total rewards of {} tokens. \
