@@ -84,6 +84,8 @@ pub struct StakingPoolArgs {
     reward_fee_fraction: Ratio,
     /// Burn fee fraction.
     burn_fee_fraction: Ratio,
+    /// Owner restakes rewards
+    does_owner_restakes_his_rewards: bool,
 }
 
 /// External interface for the callbacks to self.
@@ -145,6 +147,7 @@ impl StakingPoolFactory {
     /// - `stake_public_key` - the initial staking key for the staking pool.
     /// - `reward_fee_fraction` - the initial reward fee fraction for the staking pool.
     /// - `burn_fee_fraction` - the burn fee fraction for the staking pool.
+    /// - `owner_restakes_rewards` - does owner restakes rewards.
     #[payable]
     pub fn create_staking_pool(
         &mut self,
@@ -153,6 +156,7 @@ impl StakingPoolFactory {
         owner_id: AccountId,
         stake_public_key: PublicKey,
         reward_fee_fraction: Ratio,
+        owner_restakes_rewards: bool
     ) {
         assert!(
             env::attached_deposit() >= MIN_ATTACHED_BALANCE,
@@ -198,6 +202,7 @@ impl StakingPoolFactory {
                 stake_public_key,
                 reward_fee_fraction,
                 burn_fee_fraction: BURN_FEE_FRACTION,
+                does_owner_restakes_his_rewards: owner_restakes_rewards,
             },
         );
     }
@@ -481,6 +486,7 @@ mod tests {
                 numerator: 10,
                 denominator: 100,
             },
+            true
         );
 
         context.predecessor_account_id = account_factory().into();
@@ -529,6 +535,7 @@ mod tests {
                 numerator: 10,
                 denominator: 100,
             },
+            false
         );
     }
 
@@ -565,6 +572,7 @@ mod tests {
                 numerator: 10,
                 denominator: 100,
             },
+            false
         );
 
         context.predecessor_account_id = account_factory().into();

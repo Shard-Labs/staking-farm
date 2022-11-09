@@ -157,6 +157,8 @@ pub struct StakingContract {
     pub rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked,
     /// Map showing whether account has his rewards staked or unstaked
     pub account_pool_register: UnorderedMap<AccountId, bool>,
+    /// Variable indicating wether the owner should restake his rewards
+    pub owner_restakes_rewards: bool,
 }
 
 /// Old struct https://github.com/referencedev/staking-farm
@@ -203,11 +205,60 @@ pub struct OldStakingContract {
     pub authorized_farm_tokens: UnorderedSet<AccountId>,
 }
 
+#[derive(BorshDeserialize, BorshSerialize)]
+pub struct PreviousVersionStakingContract {
+    /// The public key which is used for staking action. It's the public key of the validator node
+    /// that validates on behalf of the pool.
+    pub stake_public_key: PublicKey,
+    /// The last epoch height when `ping` was called.
+    pub last_epoch_height: EpochHeight,
+    /// The last total balance of the account (consists of staked and unstaked balances).
+    pub last_total_balance: Balance,
+    /// The total amount to burn that will be available.
+    /// The fraction of the reward that goes to the owner of the staking pool for running the
+    /// validator node.
+    pub reward_fee_fraction: UpdatableRewardFee,
+    /// The fraction of the reward that gets burnt.
+    pub burn_fee_fraction: Ratio,
+    /// Farm tokens.
+    pub farms: Vector<Farm>,
+    /// Active farms: indicies into `farms`.
+    pub active_farms: Vec<u64>,
+    /// Whether the staking is paused.
+    /// When paused, the account unstakes everything (stakes 0) and doesn't restake.
+    /// It doesn't affect the staking shares or reward distribution.
+    /// Pausing is useful for node maintenance. Only the owner can pause and resume staking.
+    /// The contract is not paused by default.
+    pub paused: bool,
+    /// Authorized users to pause the contract.
+    pub pauser_users: UnorderedSet<AccountId>,
+    /// Authorized users, allowed to add farms.
+    /// This is done to prevent farm spam with random tokens.
+    /// Should not be a large number.
+    pub authorized_users: UnorderedSet<AccountId>,
+    /// Authorized tokens for farms.
+    /// Required because any contract can call method with ft_transfer_call, so must verify that contract will accept it.
+    pub authorized_farm_tokens: UnorderedSet<AccountId>,
+    /// Inner staking pool, that restakes the received rewards
+    pub rewards_staked_staking_pool: InnerStakingPool,
+    /// Inner staking pool, that doesnt restake rewards
+    pub rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked,
+    /// Map showing whether account has his rewards staked or unstaked
+    pub account_pool_register: UnorderedMap<AccountId, bool>
+}
+
 #[near_bindgen]
 impl StakingContract {
-    #[private]
+
     #[init(ignore_state)]
     pub fn migrate_state() -> Self{
+        assert_eq!(
+            env::predecessor_account_id(),
+            StakingContract::internal_get_owner_id(),
+            "{}",
+            owner::ERR_MUST_BE_OWNER
+        );
+
         let old_state: OldStakingContract = env::state_read().expect("failed");
 
         let mut this = Self{
@@ -225,6 +276,7 @@ impl StakingContract {
             rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(old_state.total_staked_balance), old_state.total_staked_balance, old_state.total_burn_shares),
             rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
             account_pool_register: UnorderedMap::new(StorageKeys::AccountRegistry),
+            owner_restakes_rewards: true,
         };
 
         this.rewards_staked_staking_pool.accounts = old_state.accounts;
@@ -232,9 +284,6 @@ impl StakingContract {
 
         // Initially the owner is the only user authorized to pause the contract.
         this.pauser_users.insert(&owner_id);
-
-        this.internal_register_account_to_staking_pool(&owner_id, true);
-        this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
 
         return this;
     }
@@ -251,6 +300,7 @@ impl StakingContract {
         stake_public_key: PublicKey,
         reward_fee_fraction: Ratio,
         burn_fee_fraction: Ratio,
+        does_owner_restakes_his_rewards: bool,
     ) -> Self {
         reward_fee_fraction.assert_valid();
         burn_fee_fraction.assert_valid();
@@ -280,6 +330,7 @@ impl StakingContract {
             rewards_staked_staking_pool: InnerStakingPool::new(NumStakeShares::from(total_staked_balance), total_staked_balance, 0),
             rewards_not_staked_staking_pool: InnerStakingPoolWithoutRewardsRestaked::new(),
             account_pool_register: UnorderedMap::new(StorageKeys::AccountRegistry),
+            owner_restakes_rewards: does_owner_restakes_his_rewards,
         };
 
         // Initially the owner is the only user authorized to pause the contract.
@@ -288,8 +339,6 @@ impl StakingContract {
         Self::internal_set_owner(&owner_id);
         Self::internal_set_factory(&env::predecessor_account_id());
         Self::internal_set_version();
-        this.internal_register_account_to_staking_pool(&owner_id, true);
-        this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
         // Staking with the current pool to make sure the staking key is valid.
         this.internal_restake();
         this
@@ -323,7 +372,7 @@ mod tests {
         let pub_key = "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
             .parse()
             .unwrap();
-        let mut emulator = Emulator::new(owner(), pub_key, zero_fee(), Option::None,);
+        let mut emulator = Emulator::new(owner(), owner(), pub_key, zero_fee(), Option::None, true);
         emulator.update_context(bob(), 0);
         emulator.contract.internal_restake();
         let receipts = get_created_receipts();
@@ -359,11 +408,13 @@ mod tests {
     fn test_deposit_withdraw() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         let deposit_amount = ntoy(1_000_000);
         emulator.update_context(bob(), deposit_amount);
@@ -386,6 +437,7 @@ mod tests {
     fn test_stake_with_fee() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
@@ -394,6 +446,7 @@ mod tests {
                 denominator: 100,
             },
             Option::None,
+            true
         );
         let deposit_amount = ntoy(1_000_000);
         emulator.update_context(bob(), deposit_amount);
@@ -456,11 +509,13 @@ mod tests {
     fn test_stake_unstake() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         let deposit_amount = ntoy(1_000_000);
         emulator.update_context(bob(), deposit_amount);
@@ -514,11 +569,13 @@ mod tests {
     fn test_stake_all_unstake_all() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         let deposit_amount = ntoy(1_000_000);
         emulator.update_context(bob(), deposit_amount);
@@ -556,11 +613,13 @@ mod tests {
     fn test_two_delegates() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         emulator.update_context(alice(), ntoy(1_000_000));
         emulator.contract.deposit();
@@ -616,11 +675,13 @@ mod tests {
     fn test_low_balances() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         let initial_balance = 100;
         emulator.update_context(alice(), initial_balance);
@@ -641,11 +702,13 @@ mod tests {
     fn test_rewards() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         let initial_balance = ntoy(100);
         emulator.update_context(alice(), initial_balance);
@@ -669,11 +732,13 @@ mod tests {
     fn test_farm() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
@@ -754,11 +819,13 @@ mod tests {
     fn test_stop_farm() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
@@ -788,11 +855,13 @@ mod tests {
     fn test_farm_not_authorized_token() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         // token was not added as authorized, should fail
         add_farm(&mut emulator, ntoy(100));
@@ -803,11 +872,13 @@ mod tests {
     fn test_farm_too_small_amount() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
@@ -818,11 +889,13 @@ mod tests {
     fn test_change_reward_fee() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Option::None,
+            true
         );
         assert_eq!(emulator.contract.get_reward_fee_fraction(), zero_fee());
         emulator.update_context(owner(), 1);
@@ -895,9 +968,11 @@ mod tests {
     fn test_two_staking_pools_total_balance(){
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND),
+            true
         );
 
         let bob_deposit_amount = ntoy(50);
@@ -958,9 +1033,11 @@ mod tests {
     fn test_check_rewards(){
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND),
+            true
         );
 
         let bob_deposit_amount = ntoy(100);
@@ -1018,9 +1095,11 @@ mod tests {
         let initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(initial_balance),
+            true
         );
 
         let mut future_rewards = UnorderedMap::new("fr".as_bytes());
@@ -1199,11 +1278,13 @@ mod tests {
     fn test_farm_different_staking_pools() {
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7"
                 .parse()
                 .unwrap(),
             zero_fee(),
             Some(ntoy(100) + 10u128.pow(12)),
+            true
         );
         emulator.update_context(owner(), 1);
         emulator.contract.add_authorized_farm_token(&bob());
@@ -1289,9 +1370,11 @@ mod tests {
         let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(initial_balance),
+            true
         );
 
         let a_deposit_amount = ntoy(50);
@@ -1436,9 +1519,11 @@ mod tests {
         let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
         let mut emulator = Emulator::new(
             owner(),
+            owner(),
             "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
             zero_fee(),
             Some(initial_balance),
+            true
         );
 
         let a_deposit_amount = ntoy(50);
@@ -1482,5 +1567,109 @@ mod tests {
         assert_eq!(accs.len(), 3);
         assert_eq!(accs.get(2).unwrap().account_id, e());
 
+    }
+
+    #[test]
+    fn owner_does_not_restake_rewards(){
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let _initial_stake = initial_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            AccountId::new_unchecked("stfarm-contract".to_string()),
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(initial_balance),
+            false
+        );
+
+        assert_eq!(emulator.contract.owner_restakes_rewards, false);
+        let owner_deposit_amount = ntoy(50);
+        emulator.deposit_and_stake(owner(), owner_deposit_amount);
+        emulator.simulate_stake_call();
+        emulator.skip_epochs_and_set_reward(1, ntoy(100));
+        emulator.contract.ping();
+        emulator.skip_epochs(5);
+        emulator.contract.ping();
+        let owner_acc = emulator.contract.get_account(owner());
+
+        assert!(owner_acc.possible_rewards.0 > 0);
+
+        emulator.deposit_and_stake(a(), ntoy(10));
+        emulator.simulate_stake_call();
+
+        emulator.update_context(owner(), 0);
+        emulator.contract.set_owner_id(&a());
+
+        assert_eq!(emulator.contract.owner_restakes_rewards, true);
+
+    }
+
+    #[test]
+    #[should_panic(expected = "MUST HAVE BEEN REGISTERED TO ONE OF THE POOLS")]
+    fn test_change_owner(){
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            AccountId::new_unchecked("stfarm-contract".to_string()),
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(initial_balance),
+            false
+        );
+
+        emulator.update_context(owner(), 0);
+        emulator.contract.set_owner_id(&a());        
+    }
+
+    #[test]
+    fn owner_pool_choice(){
+        let mut emulator = Emulator::new(
+            AccountId::new_unchecked("stfarm-contract".to_string()),
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            zero_fee(),
+            Some(ntoy(100)),
+            true
+        );
+
+        emulator.update_context(owner(), ntoy(20));
+        emulator.contract.internal_deposit(false);
+        let mut does_owner_restake_rewards = emulator.contract.account_pool_register.get(&owner()).unwrap();
+        assert_eq!(does_owner_restake_rewards, true);
+        assert_eq!(emulator.contract.owner_restakes_rewards, does_owner_restake_rewards);
+
+        emulator.deposit_and_stake_rewards_not_stake(a(), ntoy(20));
+        does_owner_restake_rewards = emulator.contract.account_pool_register.get(&a()).unwrap();
+        emulator.update_context(owner(), 0);
+        emulator.contract.set_owner_id(&a());
+        assert_eq!(emulator.contract.owner_restakes_rewards, does_owner_restake_rewards);
+        assert_eq!(does_owner_restake_rewards, false);
+    }
+
+    #[test]
+    fn test_owner_rewards(){
+        let initial_balance = ntoy(100) + STAKE_SHARE_PRICE_GUARANTEE_FUND;
+        let mut emulator = Emulator::new(
+            AccountId::new_unchecked("stfarm-contract".to_string()),
+            owner(),
+            "KuTCtARNzxZQ3YvXDeLjx83FDqxv2SdQTSbiq876zR7".parse().unwrap(),
+            Ratio{numerator: 10, denominator: 100},
+            Some(initial_balance),
+            false
+        );
+
+        assert_eq!(emulator.contract.owner_restakes_rewards, false);
+        let owner_deposit_amount = ntoy(100);
+        emulator.deposit_and_stake(owner(), owner_deposit_amount);
+        emulator.simulate_stake_call();
+        emulator.deposit_and_stake_rewards_not_stake(a(), ntoy(100));
+        emulator.simulate_stake_call();
+        emulator.skip_epochs_and_set_reward(1, ntoy(300));
+        emulator.contract.ping();
+        let owner_acc = emulator.contract.get_account(owner());
+        assert_eq!(owner_acc.staked_balance.0, owner_deposit_amount + ntoy(30));
+        assert_eq!(owner_acc.possible_rewards.0, ntoy(90));
+        assert_eq!(emulator.contract.get_account(a()).possible_rewards.0, ntoy(90));
+        assert_eq!(emulator.contract.rewards_not_staked_staking_pool.get_total_staked_balance(), ntoy(230));
     }
 }

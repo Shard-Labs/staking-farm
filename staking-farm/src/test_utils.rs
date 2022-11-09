@@ -95,14 +95,16 @@ pub mod tests {
 
     impl Emulator {
         pub fn new(
+            contract_id: AccountId,
             owner: AccountId,
             stake_public_key: PublicKey,
             reward_fee_fraction: Ratio,
             account_balance: Option<Balance>,
+            does_owner_restakes_rewards: bool,
         ) -> Self {
             let amount = account_balance.unwrap_or(ntoy(30));
             let context = VMContextBuilder::new()
-                .current_account_id(owner.clone())
+                .current_account_id(contract_id.clone())
                 .account_balance(amount)
                 .build();
             testing_env!(context.clone());
@@ -114,6 +116,7 @@ pub mod tests {
                     numerator: 0,
                     denominator: 0,
                 },
+                does_owner_restakes_rewards,
             );
             let last_total_staked_balance = contract.rewards_staked_staking_pool.total_staked_balance;
             let last_total_stake_shares = contract.rewards_staked_staking_pool.total_stake_shares;

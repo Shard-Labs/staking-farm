@@ -15,7 +15,7 @@ const UPGRADE_GAS_LEFTOVER: Gas = Gas(5_000_000_000_000);
 const UPDATE_GAS_LEFTOVER: Gas = Gas(5_000_000_000_000);
 const NO_DEPOSIT: Balance = 0;
 
-const ERR_MUST_BE_OWNER: &str = "Can only be called by the owner";
+pub (crate) const ERR_MUST_BE_OWNER: &str = "Can only be called by the owner";
 const ERR_MUST_BE_SELF: &str = "Can only be called by contract itself";
 const ERR_MUST_BE_FACTORY: &str = "Can only be called by staking pool factory";
 const ERR_MUST_BE_PAUSER: &str = "Can only be called by users with pauser role";
@@ -48,15 +48,22 @@ impl StakingContract {
     }
 
     /// Changes contract owner. Must be called by current owner.
-    pub fn set_owner_id(owner_id: &AccountId) {
+    pub fn set_owner_id(&mut self, owner_id: &AccountId) {
         let prev_owner = StakingContract::internal_set_owner(owner_id).expect("MUST HAVE OWNER");
+        
         assert_eq!(
             prev_owner,
             env::predecessor_account_id(),
             "MUST BE OWNER TO SET OWNER"
         );
-    }
 
+        let new_owner_restakes_rewards = self
+            .account_pool_register
+            .get(&owner_id)
+            .expect("MUST HAVE BEEN REGISTERED TO ONE OF THE POOLS");
+
+        self.owner_restakes_rewards = new_owner_restakes_rewards;
+    }
     /// Owner's method.
     /// Updates current public key to the new given public key.
     #[payable]
@@ -320,18 +327,5 @@ pub extern "C" fn migrate() {
         ERR_MUST_BE_SELF
     );
 
-    let state_version = StakingContract::internal_get_state_version();
-
-    match state_version.as_str() {
-        "staking-farm:1.1.0" => {
-            // migrate the state
-            StakingContract::migrate_state();
-
-            StakingContract::internal_set_version();
-        },
-        "staking-farm:2.0.0" => {
-            // Do nothing
-        },
-        _ => panic!("Version not recognized")
-    };
+    StakingContract::internal_set_version();
 }

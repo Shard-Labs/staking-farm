@@ -193,7 +193,7 @@ impl StakingContract {
     /// Returns the total balance of the given account (including staked and unstaked balances).
     pub fn get_account_total_balance(&self, account_id: AccountId) -> U128 {
         let account = self.get_account(account_id);
-        (account.unstaked_balance.0 + account.staked_balance.0).into()
+        (account.unstaked_balance.0 + account.staked_balance.0 + account.possible_rewards.0).into()
     }
 
     /// Returns `true` if the given account can withdraw tokens in the current epoch.
@@ -255,7 +255,6 @@ impl StakingContract {
     pub fn get_accounts(&self, from_index: u64, limit: u64) -> Vec<HumanReadableAccount>{
         let result = self.account_pool_register
                             .iter()
-                            .filter(|(acc_id, _)| *acc_id != self.get_owner_id() && *acc_id != AccountId::new_unchecked(ZERO_ADDRESS.to_string() ))
                             .skip(from_index.try_into().unwrap())
                             .take(limit.try_into().unwrap())
                             .map(|(acc_id, is_staking)|{
