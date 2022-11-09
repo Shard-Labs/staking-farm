@@ -102,7 +102,8 @@ fn create_staking_pool(
             code_hash,
             user.account_id(),
             STAKING_KEY.parse().unwrap(),
-            fee
+            fee,
+            false
         ),
         deposit = to_yocto(POOL_DEPOSIT)
     )
