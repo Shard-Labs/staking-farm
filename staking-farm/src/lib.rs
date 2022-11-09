@@ -249,9 +249,16 @@ pub struct PreviousVersionStakingContract {
 
 #[near_bindgen]
 impl StakingContract {
-    #[private]
+
     #[init(ignore_state)]
     pub fn migrate_state() -> Self{
+        assert_eq!(
+            env::predecessor_account_id(),
+            StakingContract::internal_get_owner_id(),
+            "{}",
+            owner::ERR_MUST_BE_OWNER
+        );
+
         let old_state: OldStakingContract = env::state_read().expect("failed");
 
         let mut this = Self{
@@ -278,37 +285,9 @@ impl StakingContract {
         // Initially the owner is the only user authorized to pause the contract.
         this.pauser_users.insert(&owner_id);
 
-        this.internal_register_account_to_staking_pool(&owner_id, true);
-        this.internal_register_account_to_staking_pool(&AccountId::new_unchecked(ZERO_ADDRESS.to_string()), true);
-
         return this;
     }
 
-    #[private]
-    #[init(ignore_state)]
-    pub fn migrate_from_previous_state() -> Self{
-        let old_state: PreviousVersionStakingContract = env::state_read().expect("failed");
-
-        let this = Self{
-            stake_public_key: old_state.stake_public_key,
-            last_epoch_height: old_state.last_epoch_height,
-            last_total_balance: old_state.last_total_balance,
-            reward_fee_fraction: old_state.reward_fee_fraction,
-            burn_fee_fraction: old_state.burn_fee_fraction,
-            farms: old_state.farms,
-            active_farms: old_state.active_farms,
-            paused: old_state.paused,
-            pauser_users: old_state.pauser_users,
-            authorized_users: old_state.authorized_users,
-            authorized_farm_tokens: old_state.authorized_farm_tokens,
-            rewards_staked_staking_pool: old_state.rewards_staked_staking_pool,
-            rewards_not_staked_staking_pool: old_state.rewards_not_staked_staking_pool,
-            account_pool_register: old_state.account_pool_register,
-            owner_restakes_rewards: true,
-        };
-
-        return this;
-    }
     /// Initializes the contract with the given owner_id, initial staking public key (with ED25519
     /// curve) and initial reward fee fraction that owner charges for the validation work.
     ///
